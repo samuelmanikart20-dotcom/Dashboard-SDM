@@ -1,0 +1,61 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+model User {
+  id       Int    @id @default(autoincrement())
+  email    String @unique
+  password String
+  name     String
+  role     Role   @default(USER)
+}
+
+model Daerah {
+  id         Int      @id @default(autoincrement())
+  nama       String
+  kode       String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("daerah")
+}
+
+model SpmtData {
+  id                   Int       @id @default(autoincrement())
+  npp                  String?
+  nama                 String?
+  tanggal_lahir        DateTime?
+  jabatan              String?
+  entitas              String?
+  unit_kerja           String?
+  kategori             String?
+  jenis_kelamin        String?
+  organik_non_organik  String?
+  pusat_pelayanan      String?
+  non_operasional      String?
+  status_laporan_rakondir String?
+  bulan                Int?
+  tahun                Int?
+  category             String?   // e.g., "Jenis Pekerja", "Pusat Pelayanan", "Jenis Kelamin"
+  label                String?   // e.g., "Organik", "Non Organik"
+  value                Int?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}

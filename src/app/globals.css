@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background-color: #f9fafb;
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Sembunyikan Handle ReactFlow (oval hitam) di semua kondisi, tapi tetap fungsional */
+.react-flow__handle {
+  width: 0 !important;
+  height: 0 !important;
+  opacity: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  pointer-events: auto !important; /* Tetap bisa diklik untuk koneksi */
+}
+
+.react-flow__handle-top,
+.react-flow__handle-bottom,
+.react-flow__handle-left,
+.react-flow__handle-right {
+  width: 0 !important;
+  height: 0 !important;
+  opacity: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  pointer-events: auto !important; /* Tetap bisa diklik untuk koneksi */
+}
+
+/* Pastikan edge tetap terlihat */
+.react-flow__edge {
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+}
+
+.react-flow__edge path {
+  stroke: #374151 !important;
+  stroke-width: 3 !important;
+  fill: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.react-flow__edge-path {
+  stroke: #374151 !important;
+  stroke-width: 3 !important;
+  fill: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Ensure all SVG elements are visible */
+.react-flow__edges svg {
+  overflow: visible !important;
+}
+
+/* Ensure arrowheads are visible */
+.react-flow__arrowhead {
+  fill: #374151 !important;
+  stroke: #374151 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Ensure markers are visible */
+marker {
+  opacity: 1 !important;
+  visibility: visible !important;
+  overflow: visible !important;
+}
+
+marker path {
+  fill: #374151 !important;
+  stroke: #374151 !important;
+  stroke-width: 1 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Ensure step edges (orthogonal) are visible */
+.react-flow__edge-step {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.react-flow__edge-step path {
+  stroke: #374151 !important;
+  stroke-width: 3 !important;
+  fill: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+optgroup {
+  font-weight: bold;
+  font-size: 1em;
+}
+
+optgroup option {
+  font-weight: normal;
+}
+
