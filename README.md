@@ -240,7 +240,7 @@ DATABASE_URL=mysql://user:password@host:port/database
 DB_HOST=localhost
 DB_USER=root
 DB_PASSWORD=your_password
-DB_NAME=spmt_pelindo
+DB_NAME=spmt_pelindo_revisi
 DB_PORT=3306
 
 # Google OAuth
