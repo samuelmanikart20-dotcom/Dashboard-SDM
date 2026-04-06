@@ -1,7 +1,7 @@
 -- Create PTP Database Tables (Simplified)
 -- Script untuk membuat tabel-tabel yang diperlukan untuk sistem PTP
 
-USE spmt_pelindo;
+USE spmt_pelindo_revisi;
 
 -- 1. Create ptp_daerah table for PTP regions
 DROP TABLE IF EXISTS ptp_struktur_organisasi;

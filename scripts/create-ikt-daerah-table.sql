@@ -1,7 +1,7 @@
 -- Create IKT Daerah Table
 -- Script untuk membuat tabel ikt_daerah dan mengisi data 8 cabang IKT
 
-USE spmt_pelindo;
+USE spmt_pelindo_revisi;
 
 -- 1. Create ikt_daerah table for IKT regions/cabang
 CREATE TABLE IF NOT EXISTS ikt_daerah (

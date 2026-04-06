@@ -1,7 +1,7 @@
 -- Create query untuk tabel struktur organisasi PTP, IKT, dan TCU
 -- Script untuk membuat tabel-tabel struktur organisasi dengan kolom lengkap
 
-USE spmt_pelindo;
+USE spmt_pelindo_revisi;
 
 -- ============================================
 -- Struktur PTP
