@@ -4,10 +4,11 @@ import mysql from 'mysql2/promise';
 export async function GET(_request: NextRequest) {
   try {
     const connection = await mysql.createConnection({
-      host: process.env.DB_HOST || 'localhost',
+      host: process.env.DB_HOST || '127.0.0.1',
       user: process.env.DB_USER || 'root',
       password: process.env.DB_PASSWORD || '',
-      database: process.env.DB_NAME || 'spmt_pelindo',
+      database: process.env.DB_NAME || 'spmt_pelindo_revisi',
+      port: Number(process.env.DB_PORT) || 3307
     });
 
     try {

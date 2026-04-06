@@ -30,10 +30,11 @@ export async function GET(request: NextRequest) {
     if (daerahId) {
       // Get daerah info
       const connection = await mysql.createConnection({
-        host: process.env.DB_HOST || 'localhost',
+        host: process.env.DB_HOST || '127.0.0.1',
         user: process.env.DB_USER || 'root',
         password: process.env.DB_PASSWORD || '',
-        database: process.env.DB_NAME || 'spmt_pelindo',
+        database: process.env.DB_NAME || 'spmt_pelindo_revisi',
+        port: Number(process.env.DB_PORT) || 3307
       });
 
       const [daerahResult] = await connection.execute(
@@ -214,11 +215,12 @@ export async function GET(request: NextRequest) {
 
     // Database connection
     const connection = await mysql.createConnection({
-      host: process.env.DB_HOST || 'localhost',
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || '',
-      database: process.env.DB_NAME || 'spmt_pelindo',
-    });
+  host: process.env.DB_HOST || '127.0.0.1',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'spmt_pelindo_revisi',
+  port: Number(process.env.DB_PORT) || 3307
+});
 
     try {
       // Get total count from spmtdata with filtering
@@ -278,80 +280,77 @@ export async function GET(request: NextRequest) {
       let operasional = 0, nonOperasional = 0;
 
       // Process gender data - handle both L/P and full names
-      genderData.forEach(row => {
-        const gender = row.jenis_kelamin?.toLowerCase();
-        if (gender === 'l' || gender === 'laki-laki' || gender === 'laki' || gender === 'pria') {
-          lakiLaki += row.count;
-        } else if (gender === 'p' || gender === 'perempuan' || gender === 'wanita') {
-          perempuan += row.count;
-        }
-      });
+// ===============================
+// PROCESS GENDER
+// ===============================
+genderData.forEach(row => {
+  const gender = String(row.jenis_kelamin || '').toUpperCase().trim();
 
-      // Process organik data
-      organikData.forEach(row => {
-        const status = row.organik_non_organik?.toLowerCase();
-        if (status?.includes('non') && status?.includes('organik')) {
-          nonOrganik += row.count;
-        } else if (status?.includes('organik')) {
-          organik += row.count;
-        }
-      });
+  if (gender === 'L' || gender === 'LAKI-LAKI' || gender === 'LAKI LAKI') {
+    lakiLaki += row.count;
+  } else if (gender === 'P' || gender === 'PEREMPUAN') {
+    perempuan += row.count;
+  }
+});
 
-      // Process operasional data - PRIORITIZE non_operasional column
-      operasionalData.forEach(row => {
-        let status = '';
-        
-        // PRIORITIZE non_operasional column - it's the explicit status from Excel
-        const nonOp = String(row.non_operasional || '').trim();
-        const nonOpUpper = nonOp.toUpperCase();
-        
-        // Check non_operasional first - this is the PRIMARY source of truth
-        if (nonOp && nonOp !== '') {
-          // Exact matches first (case-insensitive)
-          if (nonOpUpper === 'OPERASIONAL') {
-            status = 'operasional';
-          } else if (nonOpUpper === 'NON OPERASIONAL' || nonOpUpper === 'NON-OPERASIONAL') {
-            status = 'non-operasional';
-          } 
-          // Pattern matches - prioritize "NON" detection
-          else if (nonOpUpper.includes('NON')) {
-            status = 'non-operasional';
-          } 
-          // If it contains "OPERASIONAL" but NOT "NON", it's operasional
-          else if (nonOpUpper.includes('OPERASIONAL') && !nonOpUpper.includes('NON')) {
-            status = 'operasional';
-          }
-        }
-        
-        // ONLY if non_operasional is empty, null, or unclear, then check pusat_pelayanan
-        // This is a fallback, not a primary source
-        if (!status && row.pusat_pelayanan) {
-          const pusatPelayanan = String(row.pusat_pelayanan).toLowerCase();
-          if (pusatPelayanan.includes('operasi langsung') || pusatPelayanan.includes('operasi tidak langsung')) {
-            status = 'operasional';
-          } else if (pusatPelayanan.includes('pengelolaan') || pusatPelayanan.includes('pendukung operasi')) {
-            status = 'non-operasional';
-          } else if (pusatPelayanan.includes('operasional') && !pusatPelayanan.includes('non')) {
-            status = 'operasional';
-          } else if (pusatPelayanan.includes('non operasional') || pusatPelayanan.includes('non-operasional') || 
-                     pusatPelayanan.includes('nonoperasional')) {
-            status = 'non-operasional';
-          } else if (pusatPelayanan.includes('operasi') && !pusatPelayanan.includes('non')) {
-            status = 'operasional';
-          }
-        }
-        
-        // Default fallback
-        if (!status) {
-          status = 'non-operasional';
-        }
-        
-        if (status === 'operasional') {
-          operasional += row.count;
-        } else {
-          nonOperasional += row.count;
-        }
-      });
+// ===============================
+// PROCESS ORGANIK
+// ===============================
+organikData.forEach(row => {
+  const status = String(row.organik_non_organik || '').toUpperCase().trim();
+
+  if (status === 'ORGANIK') {
+    organik += row.count;
+  } 
+  else if (status.includes('NON')) {
+    nonOrganik += row.count;
+  }
+});
+
+// ===============================
+// PROCESS OPERASIONAL
+// ===============================
+operasionalData.forEach(row => {
+
+  const pusat = String(row.pusat_pelayanan || '').toUpperCase().trim();
+  const nonOp = String(row.non_operasional || '').toUpperCase().trim();
+
+  let status = '';
+
+  // PRIORITAS dari kolom non_operasional
+  if (nonOp === 'OPERASIONAL') {
+    status = 'operasional';
+  } 
+  else if (nonOp.includes('NON')) {
+    status = 'non-operasional';
+  }
+
+  // fallback dari pusat_pelayanan
+  if (!status) {
+
+    if (
+      pusat.includes('OPERASI LANGSUNG') ||
+      pusat.includes('OPERASI TIDAK LANGSUNG') ||
+      pusat.includes('OPERASI')
+    ) {
+      status = 'operasional';
+    }
+
+    else if (
+      pusat.includes('PENDUKUNG') ||
+      pusat.includes('PENGELOLAAN')
+    ) {
+      status = 'non-operasional';
+    }
+  }
+
+  if (status === 'operasional') {
+    operasional += row.count;
+  } else {
+    nonOperasional += row.count;
+  }
+
+});
 
       // Get combined data for detailed breakdown with filtering
       // Include non_operasional column for proper classification

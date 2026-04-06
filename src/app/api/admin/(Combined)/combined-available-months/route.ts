@@ -4,20 +4,25 @@ import mysql from "mysql2/promise";
 
 export async function GET() {
   try {
+
+    console.log("DB_HOST:", process.env.DB_HOST);
+    console.log("DB_PORT:", process.env.DB_PORT);
+
     const conn = await mysql.createConnection({
-      host: process.env.DB_HOST || "localhost",
+      host: process.env.DB_HOST || "127.0.0.1",
       user: process.env.DB_USER || "root",
       password: process.env.DB_PASSWORD || "",
-      database: process.env.DB_NAME || "spmt_pelindo",
+      database: process.env.DB_NAME || "spmt_pelindo_revisi",
+      port: Number(process.env.DB_PORT) || 3307,
     });
 
     // Ambil distinct (bulan,tahun) dari semua tabel
     const q = (t: string) =>
       `SELECT DISTINCT bulan, tahun, COUNT(*) as cnt FROM ${t} GROUP BY bulan, tahun`;
-    const [a] = await conn.query(q("spmtdata"));
+    const [a] = await conn.query(q("bopo_spmt"));
     const [b] = await conn.query(q("ptpdata"));
     const [c] = await conn.query(q("iktdata"));
-    const [d] = await conn.query(q("tcudata"));
+    const [d] = await conn.query(q("bopo_spmt"));
 
     await conn.end();
 
