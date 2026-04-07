@@ -94,6 +94,13 @@ const navigation = [
         icon: FileUp,
         description: "Upload file Excel/CSV untuk data TCU",
       },
+      {
+      name: "Upload Data Mentah",
+      href: "/admin/upload-raw-data",
+      icon: CloudUpload,
+      description: "Upload data mentah otomatis (multi sheet → auto proses)",
+    }
+
     ],
   },
   {
