@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { usePathname } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import UserSidebar from "@/components/UserSidebar";
 import Navbar from "@/components/Navbar";
 
@@ -15,6 +14,7 @@ export default function UserLayout({
   const [isLoading, setIsLoading] = useState(true);
   const [isMounted, setIsMounted] = useState(false);
   const [fadeIn, setFadeIn] = useState(false);
+
   const router = useRouter();
   const pathname = usePathname();
 
@@ -25,41 +25,52 @@ export default function UserLayout({
   useEffect(() => {
     if (!isMounted) return;
 
-    // Check if user is logged in
-    const userData = localStorage.getItem("user");
+    const rawUser = localStorage.getItem("user");
     const token = localStorage.getItem("token");
 
-    if (!userData || !token) {
+    // jika tidak ada user atau token
+    if (!rawUser || rawUser === "undefined" || !token) {
+      localStorage.removeItem("user");
+      localStorage.removeItem("token");
+      setIsLoading(false);
       router.push("/login");
       return;
     }
 
     try {
-      const user = JSON.parse(userData);
+      const user = JSON.parse(rawUser);
+
+      if (!user || typeof user !== "object" || !user.role) {
+        throw new Error("User data tidak valid");
+      }
+
       const adminRoles = ["superadmin", "admin", "admin_pembelajaran"];
+
       if (adminRoles.includes(user.role)) {
-        // Admin should use admin layout
+        setIsLoading(false);
         router.push("/admin");
         return;
       }
 
       setIsAuthorized(true);
-    } catch (error) {
-      console.error("Error parsing user data:", error);
+    } catch (err) {
+      console.error("Error parsing user data:", err);
+
+      localStorage.removeItem("user");
+      localStorage.removeItem("token");
+
       router.push("/login");
     } finally {
       setIsLoading(false);
     }
   }, [router, isMounted]);
 
-  // Smooth fade on route changes
   useEffect(() => {
     setFadeIn(false);
     const id = requestAnimationFrame(() => setFadeIn(true));
     return () => cancelAnimationFrame(id);
   }, [pathname]);
 
-  // Don't render anything until mounted to prevent hydration mismatch
   if (!isMounted) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
@@ -88,7 +99,7 @@ export default function UserLayout({
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">
-            Mengalihkan ke halaman Dashboard....
+            Mengalihkan ke halaman login...
           </p>
         </div>
       </div>
@@ -97,15 +108,11 @@ export default function UserLayout({
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Navbar */}
       <Navbar />
 
-      {/* Main Content */}
       <div className="flex">
-        {/* Sidebar */}
         <UserSidebar />
 
-        {/* Content Area */}
         <div
           key={pathname}
           className={`flex-1 p-6 transition-opacity duration-200 ${
