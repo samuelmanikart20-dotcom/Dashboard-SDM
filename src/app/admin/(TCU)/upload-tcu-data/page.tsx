@@ -45,41 +45,47 @@ export default function UploadTCUDataPage() {
   };
 
   const handleUpload = async () => {
-    setShowConfirmModal(false);
-    if (!selectedFile) return;
+  setShowConfirmModal(false);
+  if (!selectedFile) return;
 
-    setUploading(true);
-    setError(null);
-    setUploadResult(null);
+  setUploading(true);
+  setError(null);
+  setUploadResult(null);
 
-    try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('bulan', selectedMonth.toString());
-      formData.append('tahun', selectedYear.toString());
+  try {
+    // convert file ke buffer
+    const buffer = await selectedFile.arrayBuffer();
 
-      const response = await fetch('/api/admin/upload-tcu-data', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        setUploadResult(result);
-        // Show error modal if there are errors
-        if (result.errors > 0 && result.errorDetails && result.errorDetails.length > 0) {
-          setShowErrorModal(true);
-        }
-      } else {
-        setError(result.message || 'Upload failed');
+    const response = await fetch('/api/admin/upload-tcu-excel', {
+      method: 'POST',
+      body: JSON.stringify({
+        file: Array.from(new Uint8Array(buffer)),
+        bulan: selectedMonth,
+        tahun: selectedYear
+      }),
+      headers: {
+        "Content-Type": "application/json"
       }
-    } catch {
-      setError('An error occurred during upload');
-    } finally {
-      setUploading(false);
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      setUploadResult(result);
+
+      if (result.errors > 0 && result.errorDetails?.length > 0) {
+        setShowErrorModal(true);
+      }
+    } else {
+      setError(result.message || 'Upload failed');
     }
-  };
+
+  } catch (error) {
+    setError('An error occurred during upload');
+  } finally {
+    setUploading(false);
+  }
+};
 
   const downloadTemplate = () => {
     // Create a sample CSV template for TCU
