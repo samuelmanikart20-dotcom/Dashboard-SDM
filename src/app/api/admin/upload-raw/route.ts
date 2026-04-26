@@ -1,197 +1,576 @@
-export const runtime = 'nodejs'
+import { NextRequest, NextResponse } from "next/server";
+import * as XLSX from "xlsx";
+import mysql from "mysql2/promise";
 
-import { NextRequest, NextResponse } from "next/server"
-import * as XLSX from "xlsx"
-import mysql from "mysql2/promise"
+// ===============================
+// HELPER FUNCTIONS
+// ===============================
 
+const safe = (val: any): string =>
+  val !== null && val !== undefined ? val.toString().trim() : "";
+
+// Bersihkan NPP: buang .0 dari angka float Excel
+const cleanNPP = (val: any): string => {
+  if (!val) return "";
+  if (typeof val === "number") return String(Math.round(val));
+  return val.toString().trim().replace(/\.0+$/, "");
+};
+
+// "Kantor Pusat - Jakarta Pusat" → "Kantor Pusat"
+const stripKota = (lokasi: string): string => {
+  if (!lokasi) return "-";
+  const dashIdx = lokasi.indexOf(" - ");
+  if (dashIdx !== -1) return lokasi.substring(0, dashIdx).trim();
+  return lokasi.trim();
+};
+
+// "80144903 - Manajer Keuangan, SDM" → "Manajer Keuangan, SDM"
+const stripNomorJabatan = (jabatan: string): string => {
+  if (!jabatan) return "-";
+  const match = jabatan.match(/^[\dA-Za-z]+ - (.+)$/);
+  if (match) return match[1].trim();
+  return jabatan.trim();
+};
+
+// Tanggal: angka serial Excel → yyyy-mm-dd tanpa timezone shift
+const fixTanggal = (val: any): string | null => {
+  if (!val) return null;
+  if (typeof val === "number") {
+    const parsed = XLSX.SSF.parse_date_code(val);
+    if (!parsed) return null;
+    return `${String(parsed.y).padStart(4,"0")}-${String(parsed.m).padStart(2,"0")}-${String(parsed.d).padStart(2,"0")}`;
+  }
+  if (typeof val === "string") {
+    const clean = val.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(clean)) return clean.substring(0, 10);
+    const parts = clean.split(/[-\/]/);
+    if (parts.length === 3) {
+      const [a, b, c] = parts;
+      if (a.length === 4) return `${a}-${b.padStart(2,"0")}-${c.padStart(2,"0")}`;
+      if (c.length === 4) return `${c}-${b.padStart(2,"0")}-${a.padStart(2,"0")}`;
+    }
+  }
+  if (val instanceof Date) {
+    return `${String(val.getUTCFullYear()).padStart(4,"0")}-${String(val.getUTCMonth()+1).padStart(2,"0")}-${String(val.getUTCDate()).padStart(2,"0")}`;
+  }
+  return null;
+};
+
+const formatPendidikan = (val: any): string => {
+  if (!val) return "-";
+  const v = val.toString().toLowerCase();
+  if (v.includes("s3") || v.includes("doktor")) return "S3";
+  if (v.includes("s2") || v.includes("magister") || v.includes("master")) return "S2";
+  if (v.includes("s1") || v.includes("sarjana")) return "S1";
+  if (v.includes("d4")) return "D4";
+  if (v.includes("d3") || v.includes("diploma")) return "D3";
+  if (v.includes("sma") || v.includes("smk") || v.includes("menengah")) return "SMA";
+  if (v.includes("smp")) return "SMP";
+  if (v.includes("sd")) return "SD";
+  return "-";
+};
+
+const formatGender = (val: any): string => {
+  if (!val) return "-";
+  const v = val.toString().toLowerCase().trim();
+  if (v === "male" || v === "laki-laki" || v === "laki laki" || v === "l") return "Laki-laki";
+  if (v === "female" || v === "perempuan" || v === "p") return "Perempuan";
+  return "-";
+};
+
+// ===============================
+// CORE: TENTUKAN ORGANIK / NON ORGANIK
+//
+// ATURAN FINAL (berurutan prioritas):
+//
+//  1. NPP tepat 6 digit               → SELALU Organik
+//  2. NPP 11+ digit                   → SELALU Non Organik
+//  3. Status = organik keyword        → Organik
+//  4. Status = non-organik keyword    → Non Organik
+//  5. NPP 7-10 digit tanpa status     → Non Organik (default aman)
+//  6. NPP kosong tanpa status         → Non Organik (default aman)
+//
+// Keyword Organik   : regular, direksi interna, alihtugas, organik,
+//                     penugasan pelindo, penugasan
+// Keyword Non Org   : pkwt, pkwtt, alih daya, tad, pemborongan,
+//                     vendor, external, kontrak
+// ===============================
+const getOrganikKategori = (
+  statusPekerja: string,
+  entitas: string,
+  npp: string = ""
+): { organik: string; kategori: string } => {
+  const tag    = `(${entitas})`;
+  const s      = statusPekerja.toLowerCase().trim();
+  const digits = npp.replace(/\D/g, "");
+  const len    = digits.length;
+
+  const isOrganikByStatus =
+    s === "regular"           ||
+    s === "direksi interna"   ||
+    s === "alihtugas"         ||
+    s === "alih tugas"        ||
+    s === "organik"           ||
+    s === "organic"           ||
+    s.includes("penugasan");
+
+  const isNonOrganikByStatus =
+    s === "pkwt"              ||
+    s === "pkwtt"             ||
+    s.includes("alih daya")   ||
+    s.includes("tad")         ||
+    s.includes("pemborongan") ||
+    s.includes("vendor")      ||
+    s.includes("external")    ||
+    s.includes("kontrak");
+
+  let isOrganik: boolean;
+
+  if (len === 6) {
+    isOrganik = true;                   // NPP 6 digit → SELALU Organik
+  } else if (len >= 11) {
+    isOrganik = false;                  // NPP 11+ digit → SELALU Non Organik
+  } else if (isOrganikByStatus) {
+    isOrganik = true;                   // Status jelas Organik
+  } else if (isNonOrganikByStatus) {
+    isOrganik = false;                  // Status jelas Non Organik
+  } else {
+    isOrganik = false;                  // Default aman: Non Organik
+  }
+
+  const label = isOrganik ? `Organik ${tag}` : `Non Organik ${tag}`;
+  return { organik: label, kategori: label };
+};
+
+// ===============================
+// FALLBACK FIXER
+// Jika organik_non_organik masih kosong setelah parsing,
+// generate ulang dari status_laporan + npp sebelum insert ke DB
+// ===============================
+function fixOrganikIfEmpty(item: any, entitas: string): any {
+  const isKosong =
+    !item.organik_non_organik ||
+    item.organik_non_organik === "" ||
+    item.organik_non_organik === "-";
+
+  if (isKosong) {
+    const { organik, kategori } = getOrganikKategori(
+      item.status_laporan || "",
+      entitas,
+      item.npp || ""
+    );
+    return {
+      ...item,
+      organik_non_organik: organik,
+      kategori: !item.kategori || item.kategori === "-" ? kategori : item.kategori,
+    };
+  }
+  return item;
+}
+
+// ===============================
+// PARSER FORMAT MENTAH (DATA_PEKERJA_*.xlsx)
+// Sheet "TEMPLATE", filter SDM = YA
+// ===============================
+function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
+  const raw: any[][] = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: "",
+    raw: true,
+  });
+
+  // Cari baris header — scan semua, ambil yang TERAKHIR cocok
+  let headerIndex = -1;
+  for (let i = 0; i < raw.length; i++) {
+    const joined = raw[i].join("|").toLowerCase();
+    if (
+      (joined.includes("nipp") || joined.includes("nip")) &&
+      joined.includes("nama")
+    ) {
+      headerIndex = i;
+    }
+  }
+
+  // Fallback
+  if (headerIndex === -1) {
+    for (let i = 0; i < raw.length; i++) {
+      const joined = raw[i].join("|").toLowerCase();
+      if (joined.includes("nama") && joined.includes("jabatan")) {
+        headerIndex = i;
+      }
+    }
+  }
+
+  if (headerIndex === -1) {
+    console.warn("[parseRawFormat] Header tidak ditemukan!");
+    return [];
+  }
+
+  const headers = raw[headerIndex];
+  console.log("[parseRawFormat] Header baris", headerIndex, ":", headers.slice(0, 20));
+
+  const findIdx = (keys: string[]): number =>
+    headers.findIndex((h: any) =>
+      keys.some((k) => h?.toString().toLowerCase().includes(k.toLowerCase()))
+    );
+
+  const idx = {
+    npp:           findIdx(["nipp", "nip"]),
+    nama:          findIdx(["nama"]),
+    jabatan:       findIdx(["jabatan"]),
+    gender:        findIdx(["jenis kelamin", "gender"]),
+    tanggal:       findIdx(["tanggal lahir", "tgl lahir", "tgllahir"]),
+    pendidikan:    findIdx(["pendidikan"]),
+    lokasi:        findIdx([
+      "lokasi penempatan - kota",
+      "lokasi penempatan",
+      "penempatan",
+      "kota penempatan",
+      "unit kerja",
+      "lokasi",
+    ]),
+    statusPekerja: findIdx([
+      "status pekerja",
+      "statuspekerja",
+      "status_pekerja",
+      "status",
+    ]),
+    sdm:           findIdx([
+      "dihitung kekuatan sdm",
+      "kekuatan sdm",
+      "dihitung sdm",
+      "sdm",
+    ]),
+  };
+
+  console.log("[parseRawFormat] Kolom index:", idx);
+
+  const results: any[] = [];
+
+  for (let i = headerIndex + 1; i < raw.length; i++) {
+    const row = raw[i];
+    if (!row || row.every((c: any) => c === "" || c === null)) continue;
+
+    // Filter SDM = YA
+    if (idx.sdm !== -1) {
+      const sdmVal = safe(row[idx.sdm]).toUpperCase().trim();
+      if (sdmVal !== "YA" && sdmVal !== "Y") continue;
+    }
+
+    const nama = safe(row[idx.nama]);
+    if (!nama || nama.toLowerCase() === "nama") continue;
+
+    const npp           = cleanNPP(row[idx.npp]);
+    const statusPekerja = idx.statusPekerja !== -1 ? safe(row[idx.statusPekerja]) : "";
+    const lokasiRaw     = idx.lokasi !== -1 ? safe(row[idx.lokasi]) : "";
+    const jabatanRaw    = safe(row[idx.jabatan]);
+
+    const { organik, kategori } = getOrganikKategori(statusPekerja, entitas, npp);
+
+    // Debug 5 baris pertama
+    if (results.length < 5) {
+      const nDigit = npp.replace(/\D/g, "").length;
+      console.log(
+        `[RAW] baris=${i} nama="${nama}" npp="${npp}"(${nDigit}d)` +
+        ` status="${statusPekerja}" → "${organik}"`
+      );
+    }
+
+    results.push({
+      npp,
+      nama,
+      jabatan:             stripNomorJabatan(jabatanRaw),
+      unit_kerja:          stripKota(lokasiRaw),
+      jenis_kelamin:       formatGender(row[idx.gender]),
+      kategori,
+      organik_non_organik: organik,
+      status_laporan:      statusPekerja || "-",
+      pusat_pelayanan:     "",
+      non_operasional:     "",
+      pendidikan:          formatPendidikan(row[idx.pendidikan]),
+      tanggal_lahir:       fixTanggal(row[idx.tanggal]),
+      entitas,
+    });
+  }
+
+  console.log(`[parseRawFormat] Selesai: ${results.length} baris`);
+  return results;
+}
+
+// ===============================
+// PARSER FORMAT HASIL (TCU_2025_xx.xlsx)
+// Header di baris pertama
+// ===============================
+function parseResultFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
+  const raw: any[][] = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: "",
+    raw: true,
+  });
+
+  if (raw.length < 2) return [];
+
+  let headerIndex = 0;
+  for (let i = 0; i < Math.min(raw.length, 5); i++) {
+    const joined = raw[i].join("|").toLowerCase();
+    if (joined.includes("nama") && (joined.includes("npp") || joined.includes("nip"))) {
+      headerIndex = i;
+      break;
+    }
+  }
+
+  const headers = raw[headerIndex];
+  console.log("[parseResultFormat] Header:", headers.slice(0, 15));
+
+  const findIdx = (keys: string[]): number =>
+    headers.findIndex((h: any) =>
+      keys.some((k) => h?.toString().toLowerCase().includes(k.toLowerCase()))
+    );
+
+  const idx = {
+    npp:            findIdx(["npp", "nip"]),
+    nama:           findIdx(["nama"]),
+    jabatan:        findIdx(["jabatan"]),
+    gender:         findIdx(["jenis kelamin", "gender"]),
+    tanggal:        findIdx(["tanggal lahir", "tgl lahir"]),
+    pendidikan:     findIdx(["pendidikan"]),
+    unitKerja:      findIdx(["unit kerja", "unitkerja", "lokasi"]),
+    kategori:       findIdx(["kategori"]),
+    organik:        findIdx(["organik"]),
+    statusLaporan:  findIdx(["status laporan", "status pekerja", "status"]),
+    pusatPelayanan: findIdx(["pusat pelayanan"]),
+    nonOperasional: findIdx(["non operasional", "operasional"]),
+  };
+
+  const results: any[] = [];
+
+  for (let i = headerIndex + 1; i < raw.length; i++) {
+    const row = raw[i];
+    if (!row || row.every((c: any) => c === "" || c === null)) continue;
+
+    const nama = safe(row[idx.nama]);
+    if (!nama) continue;
+
+    const npp           = cleanNPP(row[idx.npp]);
+    const statusLaporan = idx.statusLaporan !== -1 ? safe(row[idx.statusLaporan]) : "";
+    let organikFinal    = idx.organik  !== -1 ? safe(row[idx.organik])  : "";
+    let kategoriFinal   = idx.kategori !== -1 ? safe(row[idx.kategori]) : "";
+
+    if (!organikFinal || organikFinal === "-" || !kategoriFinal || kategoriFinal === "-") {
+      const { organik, kategori } = getOrganikKategori(statusLaporan, entitas, npp);
+      if (!organikFinal  || organikFinal  === "-") organikFinal  = organik;
+      if (!kategoriFinal || kategoriFinal === "-") kategoriFinal = kategori;
+    }
+
+    const unitKerjaRaw = idx.unitKerja !== -1 ? safe(row[idx.unitKerja]) : "-";
+    const jabatanRaw   = safe(row[idx.jabatan]);
+
+    results.push({
+      npp,
+      nama,
+      jabatan:             stripNomorJabatan(jabatanRaw),
+      unit_kerja:          stripKota(unitKerjaRaw),
+      jenis_kelamin:       formatGender(row[idx.gender]),
+      kategori:            kategoriFinal,
+      organik_non_organik: organikFinal,
+      status_laporan:      statusLaporan || "-",
+      pusat_pelayanan:     idx.pusatPelayanan !== -1 ? safe(row[idx.pusatPelayanan]) : "",
+      non_operasional:     idx.nonOperasional !== -1 ? safe(row[idx.nonOperasional]) : "",
+      pendidikan:          formatPendidikan(row[idx.pendidikan]),
+      tanggal_lahir:       fixTanggal(row[idx.tanggal]),
+      entitas,
+    });
+  }
+
+  console.log(`[parseResultFormat] Selesai: ${results.length} baris`);
+  return results;
+}
+
+// ===============================
+// DETEKSI FORMAT FILE OTOMATIS
+// ===============================
+function detectFormat(workbook: XLSX.WorkBook): "raw" | "result" {
+  const sheetNames    = workbook.SheetNames;
+  const rawSheetNames = ["template", "status pekerja", "dihitung kekuatan sdm"];
+
+  for (const name of sheetNames) {
+    if (rawSheetNames.includes(name.toLowerCase())) {
+      console.log("[detectFormat] RAW — sheet:", name);
+      return "raw";
+    }
+  }
+
+  const firstSheet = workbook.Sheets[sheetNames[0]];
+  if (firstSheet) {
+    const firstRows: any[][] = XLSX.utils.sheet_to_json(firstSheet, {
+      header: 1, defval: "", raw: false,
+    });
+    for (let i = 0; i < Math.min(firstRows.length, 10); i++) {
+      const joined = firstRows[i].join("|").toLowerCase();
+      if (joined.includes("dihitung") && joined.includes("sdm")) {
+        console.log("[detectFormat] RAW — kolom dihitung sdm");
+        return "raw";
+      }
+      if (joined.includes("nipp") || joined.includes("nip / nipp")) {
+        console.log("[detectFormat] RAW — kolom NIPP");
+        return "raw";
+      }
+    }
+  }
+
+  console.log("[detectFormat] RESULT");
+  return "result";
+}
+
+// ===============================
+// MAIN POST HANDLER
+// ===============================
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const buffer = Buffer.from(body.file)
+    const formData = await req.formData();
+    const file  = formData.get("file")  as File;
+    const type  = (formData.get("type") as string)?.toUpperCase() || "TCU";
+    const bulan = formData.get("bulan") as string;
+    const tahun = formData.get("tahun") as string;
 
-    const workbook = XLSX.read(buffer, { type: "buffer" })
+    if (!file) {
+      return NextResponse.json(
+        { success: false, message: "File tidak ditemukan" },
+        { status: 400 }
+      );
+    }
 
-    let finalData: any[] = []
+    console.log(`[upload-raw] type=${type} bulan=${bulan} tahun=${tahun} file=${file.name}`);
 
-    workbook.SheetNames.forEach((sheetName) => {
-      const sheet = workbook.Sheets[sheetName]
+    const buffer   = Buffer.from(await file.arrayBuffer());
+    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
+    const format   = detectFormat(workbook);
 
-      const raw: any[][] = XLSX.utils.sheet_to_json(sheet, {
-        header: 1,
-        defval: ""
-      })
+    console.log("[upload-raw] SheetNames:", workbook.SheetNames, "| Format:", format);
 
-      console.log("TOTAL ROW:", raw.length)
+    let finalData: any[] = [];
 
-      // ===============================
-      // 🔥 DETEKSI HEADER FLEXIBLE
-      // ===============================
-      let headerIndex = -1
+    if (format === "raw") {
+      const targetSheet =
+        workbook.SheetNames.find((n) => n.toLowerCase() === "template") ||
+        workbook.SheetNames[0];
 
-      for (let i = 0; i < raw.length; i++) {
-        const row = raw[i].join(" ").toLowerCase()
-
-        if (
-          row.includes("nip") &&
-          row.includes("nama")
-        ) {
-          headerIndex = i
-          break
-        }
-      }
-
-      if (headerIndex === -1) {
-        console.log("❌ HEADER TIDAK DITEMUKAN")
-        return
-      }
-
-      const headers = raw[headerIndex]
-
-      console.log("HEADER FOUND:", headers)
-
-      // ===============================
-      // 🔥 MAPPING DINAMIS
-      // ===============================
-      const findIndex = (keyword: string) =>
-        headers.findIndex(h =>
-          h?.toString().toLowerCase().includes(keyword)
-        )
-
-      const idx = {
-        npp: findIndex("nip"),
-        nama: findIndex("nama"),
-        jabatan: findIndex("jabatan"),
-        unit: findIndex("unit"),
-        bidang: findIndex("bidang"),
-        gender: findIndex("kelamin"),
-        tanggal: findIndex("tanggal"),
-        pendidikan: findIndex("pendidikan")
-      }
-
-      console.log("MAPPING:", idx)
-
-      // ===============================
-      // 🔥 LOOP DATA
-      // ===============================
-      for (let i = headerIndex + 1; i < raw.length; i++) {
-        const row = raw[i]
-
-        const nama = row[idx.nama]
-        if (!nama) continue
-
-        const npp = row[idx.npp]
-        const jabatan = row[idx.jabatan]
-        const unit = row[idx.unit]
-        const bidang = row[idx.bidang]
-        const gender = row[idx.gender]
-        const pendidikan = row[idx.pendidikan]
-
-        // ===============================
-        // 🔥 KATEGORI ORGANIK
-        // ===============================
-        let kategori = "Non Organik"
-        if (npp && npp.toString().length === 6) {
-          kategori = "Organik"
-        }
-
-        // ===============================
-        // 🔥 OPERASIONAL
-        // ===============================
-        let pusat = ""
-        const b = (bidang || "").toString().toUpperCase()
-
-        if (
-          b.includes("OPERASI LANGSUNG") ||
-          b.includes("OPERASI TIDAK LANGSUNG")
-        ) pusat = "Operasional"
-
-        else if (
-          b.includes("PENDUKUNG OPERASI") ||
-          b.includes("PENGELOLAAN")
-        ) pusat = "Non Operasional"
-
-        finalData.push({
-          npp: npp || `${nama}_${i}`,
-          nama,
-          jabatan: jabatan || "-",
-          unit_kerja: unit || "-",
-          jenis_kelamin:
-            gender === "Male" ? "Laki-laki" : "Perempuan",
-          organik_non_organik: kategori,
-          pusat_pelayanan: pusat,
-          pendidikan: pendidikan || "-"
-        })
-      }
-    })
-
-    console.log("FINAL:", finalData.length)
+      console.log("[upload-raw] Proses sheet:", targetSheet);
+      const sheet  = workbook.Sheets[targetSheet];
+      const parsed = parseRawFormat(sheet, type);
+      finalData.push(...parsed);
+    } else {
+      workbook.SheetNames.forEach((sheetName) => {
+        const sheet  = workbook.Sheets[sheetName];
+        const parsed = parseResultFormat(sheet, type);
+        finalData.push(...parsed);
+      });
+    }
 
     if (finalData.length === 0) {
-      return NextResponse.json({
-        success: false,
-        message: "Data kosong setelah parsing"
-      })
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Tidak ada data yang terbaca. Pastikan:\n" +
+            "1. Format file benar\n" +
+            "2. Kolom 'Dihitung Kekuatan SDM' terisi 'YA'\n" +
+            "3. Sheet bernama 'TEMPLATE' ada di file",
+        },
+        { status: 400 }
+      );
     }
 
-    // ===============================
-    // DB
-    // ===============================
+    // ── FALLBACK SAFETY NET ──────────────────────────────────
+    // Pastikan tidak ada organik_non_organik yang kosong sebelum insert
+    finalData = finalData.map((item) => fixOrganikIfEmpty(item, type));
+
+    // Statistik
+    const kosong  = finalData.filter(d => !d.organik_non_organik || d.organik_non_organik === "").length;
+    const organik = finalData.filter(d => d.organik_non_organik?.startsWith("Organik ")).length;
+    const nonOrg  = finalData.filter(d => d.organik_non_organik?.startsWith("Non Organik")).length;
+
+    console.log(`[upload-raw] Total=${finalData.length} Organik=${organik} NonOrganik=${nonOrg} Kosong=${kosong}`);
+    if (finalData.length > 0) console.log("[upload-raw] Sample[0]:", finalData[0]);
+
+    // ── DATABASE ────────────────────────────────────────────
     const conn = await mysql.createConnection({
-      host: process.env.DB_HOST || "127.0.0.1",
-      user: process.env.DB_USER || "root",
+      host:     process.env.DB_HOST     || "127.0.0.1",
+      user:     process.env.DB_USER     || "root",
       password: process.env.DB_PASSWORD || "",
-      database: process.env.DB_NAME || "spmt_pelindo_revisi",
-      port: Number(process.env.DB_PORT) || 3307
-    })
+      database: process.env.DB_NAME     || "spmt_pelindo_revisi",
+      port:     Number(process.env.DB_PORT) || 3307,
+    });
 
-    const tableMap: any = {
-      TCU: "tcudata",
-      PTP: "ptpdata",
+    const tableMap: Record<string, string> = {
+      TCU:  "tcudata",
+      PTP:  "ptpdata",
       SPMT: "spmtdata",
-      IKT: "iktdata"
-    }
+      IKT:  "iktdata",
+    };
 
-    const table = tableMap[body.type]
+    const table = tableMap[type];
+    if (!table) {
+      await conn.end();
+      return NextResponse.json(
+        { success: false, message: `Tipe tidak dikenal: ${type}` },
+        { status: 400 }
+      );
+    }
 
     await conn.execute(
       `DELETE FROM ${table} WHERE bulan=? AND tahun=?`,
-      [body.bulan, body.tahun]
-    )
+      [bulan, tahun]
+    );
 
     for (const item of finalData) {
       await conn.execute(
         `INSERT INTO ${table}
-        (npp,nama,jabatan,unit_kerja,jenis_kelamin,
-         organik_non_organik,pusat_pelayanan,
-         pendidikan,bulan,tahun)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`,
+         (npp, nama, jabatan, unit_kerja, jenis_kelamin,
+          kategori, organik_non_organik, status_laporan,
+          pusat_pelayanan, non_operasional,
+          pendidikan, tanggal_lahir, entitas, bulan, tahun,
+          created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())`,
         [
-          item.npp,
+          item.npp                 || "",
           item.nama,
-          item.jabatan,
+          item.jabatan             || "-",
           item.unit_kerja,
           item.jenis_kelamin,
+          item.kategori,
           item.organik_non_organik,
+          item.status_laporan,
           item.pusat_pelayanan,
+          item.non_operasional,
           item.pendidikan,
-          body.bulan,
-          body.tahun
+          item.tanggal_lahir,
+          item.entitas,
+          bulan,
+          tahun,
         ]
-      )
+      );
     }
 
-    await conn.end()
+    await conn.end();
 
     return NextResponse.json({
       success: true,
-      total: finalData.length
-    })
+      total: finalData.length,
+      format_detected: format,
+      organik_count:     organik,
+      non_organik_count: nonOrg,
+      message:
+        `Berhasil upload ${finalData.length} data ` +
+        `(${format === "raw" ? "Data Mentah" : "Data Hasil"}). ` +
+        `Organik: ${organik} | Non Organik: ${nonOrg}`,
+    });
 
   } catch (err) {
-    console.error(err)
+    console.error("[upload-raw] ERROR:", err);
     return NextResponse.json(
-      { success: false, message: "Gagal proses file" },
+      { success: false, message: "Server error: " + (err as Error).message },
       { status: 500 }
-    )
+    );
   }
 }

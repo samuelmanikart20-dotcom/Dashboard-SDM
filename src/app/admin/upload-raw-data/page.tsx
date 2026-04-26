@@ -5,9 +5,24 @@ import { useState } from "react";
 export default function UploadRawDataPage() {
   const [file, setFile] = useState<File | null>(null);
   const [type, setType] = useState("TCU");
-  const [bulan, setBulan] = useState(1);
-  const [tahun, setTahun] = useState(new Date().getFullYear());
+  const [bulan, setBulan] = useState(12);
+  const [tahun, setTahun] = useState(2025);
   const [loading, setLoading] = useState(false);
+
+  const bulanList = [
+    { value: 1, label: "Januari" },
+    { value: 2, label: "Februari" },
+    { value: 3, label: "Maret" },
+    { value: 4, label: "April" },
+    { value: 5, label: "Mei" },
+    { value: 6, label: "Juni" },
+    { value: 7, label: "Juli" },
+    { value: 8, label: "Agustus" },
+    { value: 9, label: "September" },
+    { value: 10, label: "Oktober" },
+    { value: 11, label: "November" },
+    { value: 12, label: "Desember" },
+  ];
 
   const handleUpload = async () => {
     if (!file) {
@@ -18,47 +33,39 @@ export default function UploadRawDataPage() {
     setLoading(true);
 
     try {
-      const buffer = await file.arrayBuffer();
+      const formData = new FormData();
+
+      // 🔥 INI WAJIB (JANGAN DIUBAH)
+      formData.append("file", file);
+      formData.append("type", type);
+      formData.append("bulan", String(bulan));
+      formData.append("tahun", String(tahun));
 
       const res = await fetch("/api/admin/upload-raw", {
         method: "POST",
-        body: JSON.stringify({
-          file: Array.from(new Uint8Array(buffer)),
-          type,
-          bulan,
-          tahun,
-        }),
-        headers: {
-          "Content-Type": "application/json",
-        },
+        body: formData,
       });
 
-      // 🔥 ambil raw response dulu
-      const text = await res.text();
-      console.log("🔥 RAW RESPONSE:", text);
+      const result = await res.json();
 
-      let result: any;
+      console.log("RESULT:", result);
 
-      try {
-        result = JSON.parse(text);
-      } catch (err) {
-        alert("❌ Response bukan JSON (API error)");
-        setLoading(false);
+      if (!res.ok) {
+        alert("Upload gagal: " + result.message);
         return;
       }
 
-      console.log("🔥 HASIL API FULL:", result);
+      const namaBulan =
+        bulanList.find((b) => b.value === bulan)?.label || bulan;
 
-      // 🔥 tampilkan detail error biar jelas
-      if (result.success) {
-        alert(`🔥 Upload berhasil!\nTotal data: ${result.total}`);
-      } else {
-        alert(`❌ Upload gagal:\n${result.message}`);
-      }
-
+      alert(
+        `✅ Upload berhasil!\n\nJenis: ${type}\nBulan: ${namaBulan}\nTahun: ${tahun}\nTotal data: ${
+          result.total_data || result.total
+        }`
+      );
     } catch (err) {
-      console.error("ERROR:", err);
-      alert("❌ Error upload (cek console)");
+      console.error(err);
+      alert("❌ Error upload");
     }
 
     setLoading(false);
@@ -88,12 +95,17 @@ export default function UploadRawDataPage() {
         {/* Bulan */}
         <div>
           <label className="block mb-2 font-medium">Bulan</label>
-          <input
-            type="number"
+          <select
             value={bulan}
             onChange={(e) => setBulan(Number(e.target.value))}
             className="border px-3 py-2 rounded w-full text-black"
-          />
+          >
+            {bulanList.map((b) => (
+              <option key={b.value} value={b.value}>
+                {b.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Tahun */}
@@ -122,7 +134,7 @@ export default function UploadRawDataPage() {
         <button
           onClick={handleUpload}
           disabled={loading}
-          className="bg-blue-600 text-white px-4 py-2 rounded"
+          className="bg-blue-600 text-white px-4 py-2 rounded w-full"
         >
           {loading ? "Uploading..." : "Upload Sekarang"}
         </button>
