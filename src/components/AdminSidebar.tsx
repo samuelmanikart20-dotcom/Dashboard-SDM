@@ -99,6 +99,12 @@ const navigation = [
       href: "/admin/upload-raw-data",
       icon: CloudUpload,
       description: "Upload data mentah otomatis (multi sheet → auto proses)",
+    },
+      {
+      name: "Upload Mapping Jabatan",
+      href: "/admin/upload-mapping",
+      icon: CloudUpload,
+      description: "Upload data mentah otomatis (multi sheet → auto proses)",
     }
 
     ],
