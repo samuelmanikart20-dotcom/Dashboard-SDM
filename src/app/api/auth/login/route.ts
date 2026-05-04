@@ -5,12 +5,19 @@ import { dbConfig } from '@/lib/db-config';
 import { generateOTP } from '@/lib/generateOTP';
 import { sendOTP } from '@/lib/sendOTP';
 
+// ================= TURNSTILE VERIFY =================
 async function verifyTurnstileToken(token: string): Promise<boolean> {
   const secretKey = process.env.CLOUDFLARE_SECRET_KEY?.trim();
 
+  // kalau tidak pakai captcha → skip
   if (!secretKey) {
-    console.warn('CLOUDFLARE_SECRET_KEY tidak ditemukan, skip verifikasi');
+    console.warn('⚠️ CLOUDFLARE_SECRET_KEY tidak ada → skip captcha');
     return true;
+  }
+
+  if (!token) {
+    console.warn('⚠️ Token captcha kosong');
+    return false;
   }
 
   try {
@@ -18,8 +25,10 @@ async function verifyTurnstileToken(token: string): Promise<boolean> {
       'https://challenges.cloudflare.com/turnstile/v0/siteverify',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
           secret: secretKey,
           response: token,
         }),
@@ -27,17 +36,26 @@ async function verifyTurnstileToken(token: string): Promise<boolean> {
     );
 
     const data = await response.json();
+
+    // DEBUG WAJIB
+    console.log('🔥 CF RESPONSE:', data);
+
     return data.success === true;
   } catch (error) {
-    console.error('Error verifying Turnstile:', error);
+    console.error('❌ Error verify Turnstile:', error);
     return false;
   }
 }
 
+// ================= LOGIN API =================
 export async function POST(request: NextRequest) {
-  try {
-    const { email, password, turnstileToken } = await request.json();
+  let connection;
 
+  try {
+    const body = await request.json();
+    const { email, password, turnstileToken } = body;
+
+    // ================= VALIDASI INPUT =================
     if (!email || !password) {
       return NextResponse.json(
         { error: 'Email dan password diperlukan' },
@@ -46,104 +64,81 @@ export async function POST(request: NextRequest) {
     }
 
     // ================= CAPTCHA =================
-    const secretKey = process.env.CLOUDFLARE_SECRET_KEY?.trim();
+    const isCaptchaValid = await verifyTurnstileToken(turnstileToken);
 
-    if (secretKey) {
-      if (!turnstileToken) {
-        return NextResponse.json(
-          { error: 'Verifikasi CAPTCHA diperlukan' },
-          { status: 400 }
-        );
-      }
-
-      const isValid = await verifyTurnstileToken(turnstileToken);
-      if (!isValid) {
-        return NextResponse.json(
-          { error: 'CAPTCHA gagal' },
-          { status: 400 }
-        );
-      }
+    if (!isCaptchaValid) {
+      return NextResponse.json(
+        { error: 'Verifikasi CAPTCHA gagal' },
+        { status: 400 }
+      );
     }
 
-    const connection = await mysql.createConnection(dbConfig);
+    // ================= CONNECT DB =================
+    connection = await mysql.createConnection(dbConfig);
 
+    // ================= CEK USER =================
+    const [rows]: any = await connection.execute(
+      'SELECT * FROM user WHERE email = ?',
+      [email]
+    );
+
+    if (!rows || rows.length === 0) {
+      return NextResponse.json(
+        { error: 'Email atau password salah' },
+        { status: 401 }
+      );
+    }
+
+    const user = rows[0];
+
+    // ================= STATUS USER =================
+    if (!user.is_active) {
+      return NextResponse.json(
+        { error: 'Akun dinonaktifkan' },
+        { status: 403 }
+      );
+    }
+
+    // ================= VALIDASI PASSWORD =================
+    const isValidPassword = await bcrypt.compare(password, user.password);
+
+    if (!isValidPassword) {
+      return NextResponse.json(
+        { error: 'Email atau password salah' },
+        { status: 401 }
+      );
+    }
+
+    // ================= GENERATE OTP =================
+    const otp = generateOTP();
+    const otpExpired = new Date(Date.now() + 5 * 60 * 1000);
+
+    await connection.execute(
+      'UPDATE user SET otp = ?, otp_expired = ? WHERE id = ?',
+      [otp, otpExpired, user.id]
+    );
+
+    // DEBUG OTP
+    console.log('📧 Kirim OTP ke:', user.email);
+    console.log('🔑 OTP:', otp);
+
+    // ================= KIRIM EMAIL =================
     try {
-      // ================= CEK USER =================
-      const [rows]: any = await connection.execute(
-        'SELECT * FROM user WHERE email = ?',
-        [email]
-      );
-
-      if (!rows || rows.length === 0) {
-        await connection.end();
-        return NextResponse.json(
-          { error: 'Email atau password salah' },
-          { status: 401 }
-        );
-      }
-
-      const user = rows[0];
-
-      if (!user.is_active) {
-        await connection.end();
-        return NextResponse.json(
-          { error: 'Akun dinonaktifkan' },
-          { status: 403 }
-        );
-      }
-
-      const isValidPassword = await bcrypt.compare(
-        password,
-        user.password
-      );
-
-      if (!isValidPassword) {
-        await connection.end();
-        return NextResponse.json(
-          { error: 'Email atau password salah' },
-          { status: 401 }
-        );
-      }
-
-      // ================= OTP =================
-      const otp = generateOTP();
-      const otpExpired = new Date(Date.now() + 5 * 60 * 1000);
-
-      // simpan ke DB
-      await connection.execute(
-        'UPDATE user SET otp = ?, otp_expired = ? WHERE id = ?',
-        [otp, otpExpired, user.id]
-      );
-
-      // DEBUG (WAJIB)
-      console.log("Kirim OTP ke:", user.email);
-      console.log("OTP:", otp);
-
-      // kirim email
-      try {
-        await sendOTP(user.email, otp);
-        console.log("Email OTP berhasil dikirim");
-      } catch (error) {
-        console.error("ERROR EMAIL:", error);
-      }
-
-      await connection.end();
-
-      return NextResponse.json({
-        success: true,
-        requireOTP: true,
-        message: 'OTP dikirim ke email',
-        email: user.email,
-      });
-
-    } catch (dbError) {
-      await connection.end();
-      console.error('DB error:', dbError);
-      throw new Error('Gagal login');
+      await sendOTP(user.email, otp);
+      console.log('✅ Email OTP berhasil dikirim');
+    } catch (error) {
+      console.error('❌ ERROR EMAIL:', error);
     }
+
+    return NextResponse.json({
+      success: true,
+      requireOTP: true,
+      message: 'OTP dikirim ke email',
+      email: user.email,
+    });
 
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('❌ Login error:', error);
 
     return NextResponse.json(
       {
@@ -154,5 +149,10 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     );
+  } finally {
+    // ================= PASTIKAN CONNECTION DITUTUP =================
+    if (connection) {
+      await connection.end();
+    }
   }
 }
