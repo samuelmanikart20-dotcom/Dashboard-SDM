@@ -9,14 +9,12 @@ import mysql from "mysql2/promise";
 const safe = (val: any): string =>
   val !== null && val !== undefined ? val.toString().trim() : "";
 
-// Bersihkan NPP: buang .0 dari angka float Excel
 const cleanNPP = (val: any): string => {
   if (!val) return "";
   if (typeof val === "number") return String(Math.round(val));
   return val.toString().trim().replace(/\.0+$/, "");
 };
 
-// "Kantor Pusat - Jakarta Pusat" → "Kantor Pusat"
 const stripKota = (lokasi: string): string => {
   if (!lokasi) return "-";
   const dashIdx = lokasi.indexOf(" - ");
@@ -24,7 +22,6 @@ const stripKota = (lokasi: string): string => {
   return lokasi.trim();
 };
 
-// "80144903 - Manajer Keuangan, SDM" → "Manajer Keuangan, SDM"
 const stripNomorJabatan = (jabatan: string): string => {
   if (!jabatan) return "-";
   const match = jabatan.match(/^[\dA-Za-z]+ - (.+)$/);
@@ -32,13 +29,12 @@ const stripNomorJabatan = (jabatan: string): string => {
   return jabatan.trim();
 };
 
-// Tanggal: angka serial Excel → yyyy-mm-dd tanpa timezone shift
 const fixTanggal = (val: any): string | null => {
   if (!val) return null;
   if (typeof val === "number") {
     const parsed = XLSX.SSF.parse_date_code(val);
     if (!parsed) return null;
-    return `${String(parsed.y).padStart(4,"0")}-${String(parsed.m).padStart(2,"0")}-${String(parsed.d).padStart(2,"0")}`;
+    return `${String(parsed.y).padStart(4, "0")}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
   }
   if (typeof val === "string") {
     const clean = val.trim();
@@ -46,28 +42,37 @@ const fixTanggal = (val: any): string | null => {
     const parts = clean.split(/[-\/]/);
     if (parts.length === 3) {
       const [a, b, c] = parts;
-      if (a.length === 4) return `${a}-${b.padStart(2,"0")}-${c.padStart(2,"0")}`;
-      if (c.length === 4) return `${c}-${b.padStart(2,"0")}-${a.padStart(2,"0")}`;
+      if (a.length === 4) return `${a}-${b.padStart(2, "0")}-${c.padStart(2, "0")}`;
+      if (c.length === 4) return `${c}-${b.padStart(2, "0")}-${a.padStart(2, "0")}`;
     }
   }
   if (val instanceof Date) {
-    return `${String(val.getUTCFullYear()).padStart(4,"0")}-${String(val.getUTCMonth()+1).padStart(2,"0")}-${String(val.getUTCDate()).padStart(2,"0")}`;
+    return `${String(val.getUTCFullYear()).padStart(4, "0")}-${String(val.getUTCMonth() + 1).padStart(2, "0")}-${String(val.getUTCDate()).padStart(2, "0")}`;
   }
   return null;
 };
 
+// ✅ PERBAIKAN UTAMA: formatPendidikan sekarang menyimpan nilai asli jika tidak cocok
 const formatPendidikan = (val: any): string => {
   if (!val) return "-";
-  const v = val.toString().toLowerCase();
-  if (v.includes("s3") || v.includes("doktor")) return "S3";
+  const raw = val.toString().trim();
+  if (!raw || raw === "-") return "-";
+  
+  const v = raw.toLowerCase();
+  if (v.includes("s3") || v.includes("doktor") || v.includes("doctor")) return "S3";
   if (v.includes("s2") || v.includes("magister") || v.includes("master")) return "S2";
   if (v.includes("s1") || v.includes("sarjana")) return "S1";
   if (v.includes("d4")) return "D4";
   if (v.includes("d3") || v.includes("diploma")) return "D3";
-  if (v.includes("sma") || v.includes("smk") || v.includes("menengah")) return "SMA";
-  if (v.includes("smp")) return "SMP";
-  if (v.includes("sd")) return "SD";
-  return "-";
+  if (v.includes("d2")) return "D2";
+  if (v.includes("d1")) return "D1";
+  if (v.includes("sma") || v.includes("smk") || v.includes("menengah atas")) return "SMA/SMK";
+  if (v.includes("smp") || v.includes("menengah pertama")) return "SMP";
+  if (v.includes("sd") || v.includes("sekolah dasar")) return "SD";
+  
+  // ✅ Jika tidak cocok keyword apapun, simpan nilai asli (bukan "-")
+  // Ini mencegah data pendidikan hilang
+  return raw.toUpperCase();
 };
 
 const formatGender = (val: any): string => {
@@ -79,74 +84,55 @@ const formatGender = (val: any): string => {
 };
 
 // ===============================
-// CORE: TENTUKAN ORGANIK / NON ORGANIK
-//
-// ATURAN FINAL (berurutan prioritas):
-//
-//  1. NPP tepat 6 digit               → SELALU Organik
-//  2. NPP 11+ digit                   → SELALU Non Organik
-//  3. Status = organik keyword        → Organik
-//  4. Status = non-organik keyword    → Non Organik
-//  5. NPP 7-10 digit tanpa status     → Non Organik (default aman)
-//  6. NPP kosong tanpa status         → Non Organik (default aman)
-//
-// Keyword Organik   : regular, direksi interna, alihtugas, organik,
-//                     penugasan pelindo, penugasan
-// Keyword Non Org   : pkwt, pkwtt, alih daya, tad, pemborongan,
-//                     vendor, external, kontrak
+// ORGANIK / NON ORGANIK
 // ===============================
 const getOrganikKategori = (
   statusPekerja: string,
   entitas: string,
   npp: string = ""
 ): { organik: string; kategori: string } => {
-  const tag    = `(${entitas})`;
-  const s      = statusPekerja.toLowerCase().trim();
+  const tag = `(${entitas})`;
+  const s = statusPekerja.toLowerCase().trim();
   const digits = npp.replace(/\D/g, "");
-  const len    = digits.length;
+  const len = digits.length;
 
   const isOrganikByStatus =
-    s === "regular"           ||
-    s === "direksi interna"   ||
-    s === "alihtugas"         ||
-    s === "alih tugas"        ||
-    s === "organik"           ||
-    s === "organic"           ||
+    s === "regular" ||
+    s === "direksi interna" ||
+    s === "alihtugas" ||
+    s === "alih tugas" ||
+    s === "organik" ||
+    s === "organic" ||
     s.includes("penugasan");
 
   const isNonOrganikByStatus =
-    s === "pkwt"              ||
-    s === "pkwtt"             ||
-    s.includes("alih daya")   ||
-    s.includes("tad")         ||
+    s === "pkwt" ||
+    s === "pkwtt" ||
+    s.includes("alih daya") ||
+    s.includes("tad") ||
     s.includes("pemborongan") ||
-    s.includes("vendor")      ||
-    s.includes("external")    ||
+    s.includes("vendor") ||
+    s.includes("external") ||
     s.includes("kontrak");
 
   let isOrganik: boolean;
 
   if (len === 6) {
-    isOrganik = true;                   // NPP 6 digit → SELALU Organik
+    isOrganik = true;
   } else if (len >= 11) {
-    isOrganik = false;                  // NPP 11+ digit → SELALU Non Organik
+    isOrganik = false;
   } else if (isOrganikByStatus) {
-    isOrganik = true;                   // Status jelas Organik
+    isOrganik = true;
   } else if (isNonOrganikByStatus) {
-    isOrganik = false;                  // Status jelas Non Organik
+    isOrganik = false;
   } else {
-    isOrganik = false;                  // Default aman: Non Organik
+    isOrganik = false;
   }
 
   const label = isOrganik ? `Organik ${tag}` : `Non Organik ${tag}`;
   return { organik: label, kategori: label };
 };
 
-// ===============================
-// FALLBACK FIXER
-// Jika organik_non_organik masih kosong setelah parsing,
-// generate ulang dari status_laporan + npp sebelum insert ke DB
-// ===============================
 function fixOrganikIfEmpty(item: any, entitas: string): any {
   const isKosong =
     !item.organik_non_organik ||
@@ -169,8 +155,7 @@ function fixOrganikIfEmpty(item: any, entitas: string): any {
 }
 
 // ===============================
-// PARSER FORMAT MENTAH (DATA_PEKERJA_*.xlsx)
-// Sheet "TEMPLATE", filter SDM = YA
+// PARSER FORMAT MENTAH
 // ===============================
 function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
   const raw: any[][] = XLSX.utils.sheet_to_json(sheet, {
@@ -179,7 +164,6 @@ function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
     raw: true,
   });
 
-  // Cari baris header — scan semua, ambil yang TERAKHIR cocok
   let headerIndex = -1;
   for (let i = 0; i < raw.length; i++) {
     const joined = raw[i].join("|").toLowerCase();
@@ -191,7 +175,6 @@ function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
     }
   }
 
-  // Fallback
   if (headerIndex === -1) {
     for (let i = 0; i < raw.length; i++) {
       const joined = raw[i].join("|").toLowerCase();
@@ -215,13 +198,20 @@ function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
     );
 
   const idx = {
-    npp:           findIdx(["nipp", "nip"]),
-    nama:          findIdx(["nama"]),
-    jabatan:       findIdx(["jabatan"]),
-    gender:        findIdx(["jenis kelamin", "gender"]),
-    tanggal:       findIdx(["tanggal lahir", "tgl lahir", "tgllahir"]),
-    pendidikan:    findIdx(["pendidikan"]),
-    lokasi:        findIdx([
+    npp: findIdx(["nipp", "nip"]),
+    nama: findIdx(["nama"]),
+    jabatan: findIdx(["jabatan"]),
+    gender: findIdx(["jenis kelamin", "gender"]),
+    tanggal: findIdx(["tanggal lahir", "tgl lahir", "tgllahir"]),
+    // ✅ PERBAIKAN: tambah lebih banyak variasi nama kolom pendidikan
+    pendidikan: findIdx([
+      "pendidikan terakhir",
+      "pendidikan akhir",
+      "pendidikan",
+      "tingkat pendidikan",
+      "edu",
+    ]),
+    lokasi: findIdx([
       "lokasi penempatan - kota",
       "lokasi penempatan",
       "penempatan",
@@ -235,7 +225,7 @@ function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
       "status_pekerja",
       "status",
     ]),
-    sdm:           findIdx([
+    sdm: findIdx([
       "dihitung kekuatan sdm",
       "kekuatan sdm",
       "dihitung sdm",
@@ -251,7 +241,6 @@ function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
     const row = raw[i];
     if (!row || row.every((c: any) => c === "" || c === null)) continue;
 
-    // Filter SDM = YA
     if (idx.sdm !== -1) {
       const sdmVal = safe(row[idx.sdm]).toUpperCase().trim();
       if (sdmVal !== "YA" && sdmVal !== "Y") continue;
@@ -260,35 +249,38 @@ function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
     const nama = safe(row[idx.nama]);
     if (!nama || nama.toLowerCase() === "nama") continue;
 
-    const npp           = cleanNPP(row[idx.npp]);
+    const npp = cleanNPP(row[idx.npp]);
     const statusPekerja = idx.statusPekerja !== -1 ? safe(row[idx.statusPekerja]) : "";
-    const lokasiRaw     = idx.lokasi !== -1 ? safe(row[idx.lokasi]) : "";
-    const jabatanRaw    = safe(row[idx.jabatan]);
+    const lokasiRaw = idx.lokasi !== -1 ? safe(row[idx.lokasi]) : "";
+    const jabatanRaw = safe(row[idx.jabatan]);
 
     const { organik, kategori } = getOrganikKategori(statusPekerja, entitas, npp);
 
-    // Debug 5 baris pertama
+    // ✅ Ambil nilai pendidikan dari kolom yang ditemukan
+    const pendidikanRaw = idx.pendidikan !== -1 ? safe(row[idx.pendidikan]) : "";
+    const pendidikanFinal = formatPendidikan(pendidikanRaw);
+
     if (results.length < 5) {
       const nDigit = npp.replace(/\D/g, "").length;
       console.log(
         `[RAW] baris=${i} nama="${nama}" npp="${npp}"(${nDigit}d)` +
-        ` status="${statusPekerja}" → "${organik}"`
+        ` status="${statusPekerja}" pendidikan="${pendidikanRaw}"→"${pendidikanFinal}" → "${organik}"`
       );
     }
 
     results.push({
       npp,
       nama,
-      jabatan:             stripNomorJabatan(jabatanRaw),
-      unit_kerja:          stripKota(lokasiRaw),
-      jenis_kelamin:       formatGender(row[idx.gender]),
+      jabatan: stripNomorJabatan(jabatanRaw),
+      unit_kerja: stripKota(lokasiRaw),
+      jenis_kelamin: formatGender(row[idx.gender]),
       kategori,
       organik_non_organik: organik,
-      status_laporan:      statusPekerja || "-",
-      pusat_pelayanan:     "",
-      non_operasional:     "",
-      pendidikan:          formatPendidikan(row[idx.pendidikan]),
-      tanggal_lahir:       fixTanggal(row[idx.tanggal]),
+      status_laporan: statusPekerja || "-",
+      pusat_pelayanan: "",
+      non_operasional: "",
+      pendidikan: pendidikanFinal,
+      tanggal_lahir: fixTanggal(row[idx.tanggal]),
       entitas,
     });
   }
@@ -298,8 +290,7 @@ function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
 }
 
 // ===============================
-// PARSER FORMAT HASIL (TCU_2025_xx.xlsx)
-// Header di baris pertama
+// PARSER FORMAT HASIL
 // ===============================
 function parseResultFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
   const raw: any[][] = XLSX.utils.sheet_to_json(sheet, {
@@ -328,16 +319,21 @@ function parseResultFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
     );
 
   const idx = {
-    npp:            findIdx(["npp", "nip"]),
-    nama:           findIdx(["nama"]),
-    jabatan:        findIdx(["jabatan"]),
-    gender:         findIdx(["jenis kelamin", "gender"]),
-    tanggal:        findIdx(["tanggal lahir", "tgl lahir"]),
-    pendidikan:     findIdx(["pendidikan"]),
-    unitKerja:      findIdx(["unit kerja", "unitkerja", "lokasi"]),
-    kategori:       findIdx(["kategori"]),
-    organik:        findIdx(["organik"]),
-    statusLaporan:  findIdx(["status laporan", "status pekerja", "status"]),
+    npp: findIdx(["npp", "nip"]),
+    nama: findIdx(["nama"]),
+    jabatan: findIdx(["jabatan"]),
+    gender: findIdx(["jenis kelamin", "gender"]),
+    tanggal: findIdx(["tanggal lahir", "tgl lahir"]),
+    pendidikan: findIdx([
+      "pendidikan terakhir",
+      "pendidikan akhir",
+      "pendidikan",
+      "tingkat pendidikan",
+    ]),
+    unitKerja: findIdx(["unit kerja", "unitkerja", "lokasi"]),
+    kategori: findIdx(["kategori"]),
+    organik: findIdx(["organik"]),
+    statusLaporan: findIdx(["status laporan", "status pekerja", "status"]),
     pusatPelayanan: findIdx(["pusat pelayanan"]),
     nonOperasional: findIdx(["non operasional", "operasional"]),
   };
@@ -351,33 +347,34 @@ function parseResultFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
     const nama = safe(row[idx.nama]);
     if (!nama) continue;
 
-    const npp           = cleanNPP(row[idx.npp]);
+    const npp = cleanNPP(row[idx.npp]);
     const statusLaporan = idx.statusLaporan !== -1 ? safe(row[idx.statusLaporan]) : "";
-    let organikFinal    = idx.organik  !== -1 ? safe(row[idx.organik])  : "";
-    let kategoriFinal   = idx.kategori !== -1 ? safe(row[idx.kategori]) : "";
+    let organikFinal = idx.organik !== -1 ? safe(row[idx.organik]) : "";
+    let kategoriFinal = idx.kategori !== -1 ? safe(row[idx.kategori]) : "";
 
     if (!organikFinal || organikFinal === "-" || !kategoriFinal || kategoriFinal === "-") {
       const { organik, kategori } = getOrganikKategori(statusLaporan, entitas, npp);
-      if (!organikFinal  || organikFinal  === "-") organikFinal  = organik;
+      if (!organikFinal || organikFinal === "-") organikFinal = organik;
       if (!kategoriFinal || kategoriFinal === "-") kategoriFinal = kategori;
     }
 
     const unitKerjaRaw = idx.unitKerja !== -1 ? safe(row[idx.unitKerja]) : "-";
-    const jabatanRaw   = safe(row[idx.jabatan]);
+    const jabatanRaw = safe(row[idx.jabatan]);
+    const pendidikanRaw = idx.pendidikan !== -1 ? safe(row[idx.pendidikan]) : "";
 
     results.push({
       npp,
       nama,
-      jabatan:             stripNomorJabatan(jabatanRaw),
-      unit_kerja:          stripKota(unitKerjaRaw),
-      jenis_kelamin:       formatGender(row[idx.gender]),
-      kategori:            kategoriFinal,
+      jabatan: stripNomorJabatan(jabatanRaw),
+      unit_kerja: stripKota(unitKerjaRaw),
+      jenis_kelamin: formatGender(row[idx.gender]),
+      kategori: kategoriFinal,
       organik_non_organik: organikFinal,
-      status_laporan:      statusLaporan || "-",
-      pusat_pelayanan:     idx.pusatPelayanan !== -1 ? safe(row[idx.pusatPelayanan]) : "",
-      non_operasional:     idx.nonOperasional !== -1 ? safe(row[idx.nonOperasional]) : "",
-      pendidikan:          formatPendidikan(row[idx.pendidikan]),
-      tanggal_lahir:       fixTanggal(row[idx.tanggal]),
+      status_laporan: statusLaporan || "-",
+      pusat_pelayanan: idx.pusatPelayanan !== -1 ? safe(row[idx.pusatPelayanan]) : "",
+      non_operasional: idx.nonOperasional !== -1 ? safe(row[idx.nonOperasional]) : "",
+      pendidikan: formatPendidikan(pendidikanRaw),
+      tanggal_lahir: fixTanggal(row[idx.tanggal]),
       entitas,
     });
   }
@@ -387,10 +384,10 @@ function parseResultFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
 }
 
 // ===============================
-// DETEKSI FORMAT FILE OTOMATIS
+// DETEKSI FORMAT FILE
 // ===============================
 function detectFormat(workbook: XLSX.WorkBook): "raw" | "result" {
-  const sheetNames    = workbook.SheetNames;
+  const sheetNames = workbook.SheetNames;
   const rawSheetNames = ["template", "status pekerja", "dihitung kekuatan sdm"];
 
   for (const name of sheetNames) {
@@ -403,7 +400,9 @@ function detectFormat(workbook: XLSX.WorkBook): "raw" | "result" {
   const firstSheet = workbook.Sheets[sheetNames[0]];
   if (firstSheet) {
     const firstRows: any[][] = XLSX.utils.sheet_to_json(firstSheet, {
-      header: 1, defval: "", raw: false,
+      header: 1,
+      defval: "",
+      raw: false,
     });
     for (let i = 0; i < Math.min(firstRows.length, 10); i++) {
       const joined = firstRows[i].join("|").toLowerCase();
@@ -428,8 +427,8 @@ function detectFormat(workbook: XLSX.WorkBook): "raw" | "result" {
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
-    const file  = formData.get("file")  as File;
-    const type  = (formData.get("type") as string)?.toUpperCase() || "TCU";
+    const file = formData.get("file") as File;
+    const type = (formData.get("type") as string)?.toUpperCase() || "TCU";
     const bulan = formData.get("bulan") as string;
     const tahun = formData.get("tahun") as string;
 
@@ -442,9 +441,9 @@ export async function POST(req: NextRequest) {
 
     console.log(`[upload-raw] type=${type} bulan=${bulan} tahun=${tahun} file=${file.name}`);
 
-    const buffer   = Buffer.from(await file.arrayBuffer());
+    const buffer = Buffer.from(await file.arrayBuffer());
     const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
-    const format   = detectFormat(workbook);
+    const format = detectFormat(workbook);
 
     console.log("[upload-raw] SheetNames:", workbook.SheetNames, "| Format:", format);
 
@@ -456,12 +455,12 @@ export async function POST(req: NextRequest) {
         workbook.SheetNames[0];
 
       console.log("[upload-raw] Proses sheet:", targetSheet);
-      const sheet  = workbook.Sheets[targetSheet];
+      const sheet = workbook.Sheets[targetSheet];
       const parsed = parseRawFormat(sheet, type);
       finalData.push(...parsed);
     } else {
       workbook.SheetNames.forEach((sheetName) => {
-        const sheet  = workbook.Sheets[sheetName];
+        const sheet = workbook.Sheets[sheetName];
         const parsed = parseResultFormat(sheet, type);
         finalData.push(...parsed);
       });
@@ -481,32 +480,35 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── FALLBACK SAFETY NET ──────────────────────────────────
-    // Pastikan tidak ada organik_non_organik yang kosong sebelum insert
+    // FALLBACK: pastikan organik tidak kosong
     finalData = finalData.map((item) => fixOrganikIfEmpty(item, type));
 
-    // Statistik
-    const kosong  = finalData.filter(d => !d.organik_non_organik || d.organik_non_organik === "").length;
-    const organik = finalData.filter(d => d.organik_non_organik?.startsWith("Organik ")).length;
-    const nonOrg  = finalData.filter(d => d.organik_non_organik?.startsWith("Non Organik")).length;
+    // ✅ DEBUG: log sample pendidikan
+    const pendidikanSample = finalData.slice(0, 5).map(d => ({ nama: d.nama, pendidikan: d.pendidikan }));
+    console.log("[upload-raw] Sample pendidikan:", pendidikanSample);
 
-    console.log(`[upload-raw] Total=${finalData.length} Organik=${organik} NonOrganik=${nonOrg} Kosong=${kosong}`);
-    if (finalData.length > 0) console.log("[upload-raw] Sample[0]:", finalData[0]);
+    const kosong = finalData.filter((d) => !d.organik_non_organik || d.organik_non_organik === "").length;
+    const organik = finalData.filter((d) => d.organik_non_organik?.startsWith("Organik ")).length;
+    const nonOrg = finalData.filter((d) => d.organik_non_organik?.startsWith("Non Organik")).length;
+    // ✅ Hitung pendidikan yang berhasil diisi
+    const pendidikanTerisi = finalData.filter((d) => d.pendidikan && d.pendidikan !== "-").length;
 
-    // ── DATABASE ────────────────────────────────────────────
+    console.log(`[upload-raw] Total=${finalData.length} Organik=${organik} NonOrganik=${nonOrg} Kosong=${kosong} PendidikanTerisi=${pendidikanTerisi}`);
+
+    // DATABASE
     const conn = await mysql.createConnection({
-      host:     process.env.DB_HOST     || "127.0.0.1",
-      user:     process.env.DB_USER     || "root",
+      host: process.env.DB_HOST || "127.0.0.1",
+      user: process.env.DB_USER || "root",
       password: process.env.DB_PASSWORD || "",
-      database: process.env.DB_NAME     || "spmt_pelindo_revisi",
-      port:     Number(process.env.DB_PORT) || 3307,
+      database: process.env.DB_NAME || "spmt_pelindo_revisi",
+      port: Number(process.env.DB_PORT) || 3307,
     });
 
     const tableMap: Record<string, string> = {
-      TCU:  "tcudata",
-      PTP:  "ptpdata",
+      TCU: "tcudata",
+      PTP: "ptpdata",
       SPMT: "spmtdata",
-      IKT:  "iktdata",
+      IKT: "iktdata",
     };
 
     const table = tableMap[type];
@@ -516,6 +518,16 @@ export async function POST(req: NextRequest) {
         { success: false, message: `Tipe tidak dikenal: ${type}` },
         { status: 400 }
       );
+    }
+
+    // ✅ Pastikan kolom pendidikan ada di tabel
+    try {
+      await conn.execute(`
+        ALTER TABLE ${table} 
+        ADD COLUMN IF NOT EXISTS pendidikan VARCHAR(100) NULL
+      `);
+    } catch {
+      // Kolom sudah ada, abaikan error
     }
 
     await conn.execute(
@@ -533,9 +545,9 @@ export async function POST(req: NextRequest) {
           created_at, updated_at)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())`,
         [
-          item.npp                 || "",
+          item.npp || "",
           item.nama,
-          item.jabatan             || "-",
+          item.jabatan || "-",
           item.unit_kerja,
           item.jenis_kelamin,
           item.kategori,
@@ -543,7 +555,7 @@ export async function POST(req: NextRequest) {
           item.status_laporan,
           item.pusat_pelayanan,
           item.non_operasional,
-          item.pendidikan,
+          item.pendidikan || "-",
           item.tanggal_lahir,
           item.entitas,
           bulan,
@@ -558,14 +570,14 @@ export async function POST(req: NextRequest) {
       success: true,
       total: finalData.length,
       format_detected: format,
-      organik_count:     organik,
+      organik_count: organik,
       non_organik_count: nonOrg,
+      pendidikan_terisi: pendidikanTerisi,
       message:
         `Berhasil upload ${finalData.length} data ` +
         `(${format === "raw" ? "Data Mentah" : "Data Hasil"}). ` +
-        `Organik: ${organik} | Non Organik: ${nonOrg}`,
+        `Organik: ${organik} | Non Organik: ${nonOrg} | Pendidikan terisi: ${pendidikanTerisi}`,
     });
-
   } catch (err) {
     console.error("[upload-raw] ERROR:", err);
     return NextResponse.json(
