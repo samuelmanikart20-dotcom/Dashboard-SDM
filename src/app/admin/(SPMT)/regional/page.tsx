@@ -27,7 +27,7 @@ interface TableData {
   organik_non_organik: string;
   pusat_pelayanan: string;
   non_operasional: string;
-  status_laporan_rakomdir: string;
+  status_laporan: string;
 }
 
 interface ChartData {
