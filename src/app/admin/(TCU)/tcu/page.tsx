@@ -255,7 +255,7 @@ export default function TCUDashboard() {
       };
 
       setStats(dashboardStats);
-      setFullTableData(bigData.tableData || []);
+      setFullTableData(bigData.data || []);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       // Fallback to empty data if API fails
