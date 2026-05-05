@@ -7,14 +7,21 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import mysql from "mysql2/promise";
 
-const safe = (v: any) =>
+const safe = (v: any): string =>
   v !== null && v !== undefined && String(v) !== "nan" ? String(v).trim() : "";
 
-// Normalisasi NPP: buang .0 di belakang angka
+// Normalisasi NPP: buang .0 di belakang
 const normNPP = (v: any): string => {
   const s = safe(v);
+  if (!s || s === "-" || s === "nan") return "";
+  return s.replace(/\.0+$/, "").trim();
+};
+
+// Normalisasi nama: uppercase, hapus spasi ganda
+const normNama = (v: any): string => {
+  const s = safe(v);
   if (!s || s === "-") return "";
-  return s.replace(/\.0$/, "").trim();
+  return s.toUpperCase().replace(/\s+/g, " ").trim();
 };
 
 export async function POST(req: NextRequest) {
@@ -24,10 +31,10 @@ export async function POST(req: NextRequest) {
 
     const workbook = XLSX.read(buffer, { type: "buffer", raw: false });
 
-    // Coba semua sheet, kumpulkan semua baris mapping
     const allMappings: {
-      npp: string;
-      jabatan: string;
+      npp:             string;
+      nama:            string;
+      jabatan:         string;
       pusat_pelayanan: string;
       non_operasional: string;
     }[] = [];
@@ -37,14 +44,14 @@ export async function POST(req: NextRequest) {
       const raw: any[][] = XLSX.utils.sheet_to_json(sheet, {
         header: 1,
         defval: "",
-        raw: false,
+        raw:    false,
       });
 
-      // Cari baris header (mengandung "jabatan" atau "nama jabatan")
+      // Cari header row: mengandung "jabatan" atau "nama jabatan"
       let headerIndex = -1;
       for (let i = 0; i < Math.min(raw.length, 15); i++) {
         const joined = raw[i].join("|").toLowerCase();
-        if (joined.includes("jabatan")) {
+        if (joined.includes("jabatan") || joined.includes("nama jabatan")) {
           headerIndex = i;
           break;
         }
@@ -52,7 +59,6 @@ export async function POST(req: NextRequest) {
       if (headerIndex === -1) continue;
 
       const headers = raw[headerIndex];
-
       const findIdx = (keys: string[]) =>
         headers.findIndex((h: any) =>
           keys.some((k) => h?.toString().toLowerCase().includes(k.toLowerCase()))
@@ -60,12 +66,27 @@ export async function POST(req: NextRequest) {
 
       const idx = {
         npp:            findIdx(["npp", "nip"]),
+        // Cari kolom nama pekerja (bukan "nama jabatan")
+        nama:           headers.findIndex((h: any) => {
+                          const lc = h?.toString().toLowerCase() || "";
+                          return lc === "nama" || lc.trim() === "nama";
+                        }),
         jabatan:        findIdx(["nama jabatan", "jabatan"]),
         pusatPelayanan: findIdx(["pusat pelayanan"]),
         nonOperasional: findIdx(["operasional/non operasional", "non operasional", "operasional"]),
       };
 
       if (idx.jabatan === -1) continue;
+
+      // Kalau kolom nama tidak ketemu exact, coba cara lain
+      if (idx.nama === -1) {
+        // Cari kolom yang isinya nama orang (bukan "nama jabatan")
+        const namaIdx = headers.findIndex((h: any) => {
+          const lc = h?.toString().toLowerCase() || "";
+          return lc.includes("nama") && !lc.includes("jabatan");
+        });
+        if (namaIdx !== -1) (idx as any).nama = namaIdx;
+      }
 
       for (let i = headerIndex + 1; i < raw.length; i++) {
         const row     = raw[i];
@@ -75,11 +96,12 @@ export async function POST(req: NextRequest) {
         const pusat  = idx.pusatPelayanan !== -1 ? safe(row[idx.pusatPelayanan]) : "";
         const nonOps = idx.nonOperasional !== -1 ? safe(row[idx.nonOperasional]) : "";
 
-        // Skip baris yang tidak punya info pelayanan
+        // Skip baris yang tidak punya info pelayanan sama sekali
         if (!pusat && !nonOps) continue;
 
         allMappings.push({
-          npp:             idx.npp !== -1 ? normNPP(row[idx.npp]) : "",
+          npp:             normNPP(idx.npp !== -1 ? row[idx.npp] : ""),
+          nama:            normNama(idx.nama !== -1 ? row[(idx as any).nama] : ""),
           jabatan,
           pusat_pelayanan: pusat,
           non_operasional: nonOps,
@@ -92,14 +114,13 @@ export async function POST(req: NextRequest) {
         {
           success: false,
           message:
-            "Tidak ada data mapping yang terbaca. Pastikan file punya kolom: Jabatan/Nama Jabatan, Pusat Pelayanan, Operasional/Non Operasional.",
+            "Tidak ada data mapping yang terbaca. Pastikan file punya kolom: " +
+            "Jabatan/Nama Jabatan, Pusat Pelayanan, Operasional/Non Operasional.",
         },
         { status: 400 }
       );
     }
 
-    // ── Pastikan tabel mapping_jabatan punya kolom npp ─────
-    // (jalankan sekali, aman diulang)
     const conn = await mysql.createConnection({
       host:     process.env.DB_HOST     || "127.0.0.1",
       user:     process.env.DB_USER     || "root",
@@ -108,39 +129,40 @@ export async function POST(req: NextRequest) {
       port:     Number(process.env.DB_PORT) || 3307,
     });
 
-    // Tambah kolom npp jika belum ada (aman diulang)
-    try {
-      await conn.execute(
-        `ALTER TABLE mapping_jabatan ADD COLUMN IF NOT EXISTS npp VARCHAR(50) DEFAULT ''`
-      );
-    } catch (_) {
-      // Abaikan jika kolom sudah ada atau DB tidak support IF NOT EXISTS
+    // Pastikan kolom npp dan nama ada di tabel mapping_jabatan
+    for (const col of [
+      `ALTER TABLE mapping_jabatan ADD COLUMN IF NOT EXISTS npp  VARCHAR(50)  DEFAULT ''`,
+      `ALTER TABLE mapping_jabatan ADD COLUMN IF NOT EXISTS nama VARCHAR(255) DEFAULT ''`,
+    ]) {
+      try { await conn.execute(col); } catch (_) { /* sudah ada */ }
     }
 
-    // Bersihkan mapping lama, ganti semua dengan yang baru
+    // Hapus semua mapping lama, ganti dengan yang baru
     await conn.execute(`DELETE FROM mapping_jabatan`);
 
     for (const m of allMappings) {
       await conn.execute(
-        `INSERT INTO mapping_jabatan (npp, jabatan, pusat_pelayanan, non_operasional)
-         VALUES (?, ?, ?, ?)`,
-        [m.npp, m.jabatan, m.pusat_pelayanan, m.non_operasional]
+        `INSERT INTO mapping_jabatan (npp, nama, jabatan, pusat_pelayanan, non_operasional)
+         VALUES (?, ?, ?, ?, ?)`,
+        [m.npp, m.nama, m.jabatan, m.pusat_pelayanan, m.non_operasional]
       );
     }
 
     await conn.end();
 
-    const withNPP    = allMappings.filter((m) => m.npp).length;
-    const withoutNPP = allMappings.length - withNPP;
+    const withNPP  = allMappings.filter((m) => m.npp).length;
+    const withNama = allMappings.filter((m) => !m.npp && m.nama).length;
+    const withJab  = allMappings.filter((m) => !m.npp && !m.nama).length;
 
     return NextResponse.json({
-      success: true,
+      success:     true,
       total:       allMappings.length,
       with_npp:    withNPP,
-      without_npp: withoutNPP,
+      with_nama:   withNama,
+      with_jabatan_only: withJab,
       message:
         `${allMappings.length} mapping berhasil disimpan ` +
-        `(${withNPP} punya NPP, ${withoutNPP} hanya jabatan).`,
+        `(${withNPP} via NPP, ${withNama} via Nama, ${withJab} via Jabatan saja).`,
     });
   } catch (err) {
     console.error("[upload-mapping-jabatan] ERROR:", err);
