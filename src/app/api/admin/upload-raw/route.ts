@@ -1,3 +1,6 @@
+// ══════════════════════════════════════════════════════════════
+// FILE: src/app/api/admin/upload-raw/route.ts
+// ══════════════════════════════════════════════════════════════
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import mysql from "mysql2/promise";
@@ -52,12 +55,11 @@ const fixTanggal = (val: any): string | null => {
   return null;
 };
 
-// ✅ PERBAIKAN UTAMA: formatPendidikan sekarang menyimpan nilai asli jika tidak cocok
 const formatPendidikan = (val: any): string => {
   if (!val) return "-";
   const raw = val.toString().trim();
   if (!raw || raw === "-") return "-";
-  
+
   const v = raw.toLowerCase();
   if (v.includes("s3") || v.includes("doktor") || v.includes("doctor")) return "S3";
   if (v.includes("s2") || v.includes("magister") || v.includes("master")) return "S2";
@@ -69,9 +71,7 @@ const formatPendidikan = (val: any): string => {
   if (v.includes("sma") || v.includes("smk") || v.includes("menengah atas")) return "SMA/SMK";
   if (v.includes("smp") || v.includes("menengah pertama")) return "SMP";
   if (v.includes("sd") || v.includes("sekolah dasar")) return "SD";
-  
-  // ✅ Jika tidak cocok keyword apapun, simpan nilai asli (bukan "-")
-  // Ini mencegah data pendidikan hilang
+
   return raw.toUpperCase();
 };
 
@@ -85,6 +85,7 @@ const formatGender = (val: any): string => {
 
 // ===============================
 // ORGANIK / NON ORGANIK
+// ── PERBAIKAN UTAMA: logika lebih robust, fallback NPP diperbaiki
 // ===============================
 const getOrganikKategori = (
   statusPekerja: string,
@@ -92,10 +93,11 @@ const getOrganikKategori = (
   npp: string = ""
 ): { organik: string; kategori: string } => {
   const tag = `(${entitas})`;
-  const s = statusPekerja.toLowerCase().trim();
+  const s = (statusPekerja || "").toLowerCase().trim();
   const digits = npp.replace(/\D/g, "");
   const len = digits.length;
 
+  // Cek berdasarkan status pekerja dulu (lebih reliable dari panjang NPP)
   const isOrganikByStatus =
     s === "regular" ||
     s === "direksi interna" ||
@@ -103,7 +105,8 @@ const getOrganikKategori = (
     s === "alih tugas" ||
     s === "organik" ||
     s === "organic" ||
-    s.includes("penugasan");
+    s.includes("penugasan") ||
+    s.includes("tetap");                    // ← tambahan: status "tetap" = organik
 
   const isNonOrganikByStatus =
     s === "pkwt" ||
@@ -113,19 +116,25 @@ const getOrganikKategori = (
     s.includes("pemborongan") ||
     s.includes("vendor") ||
     s.includes("external") ||
-    s.includes("kontrak");
+    s.includes("kontrak") ||
+    s.includes("outsource");               // ← tambahan
 
   let isOrganik: boolean;
 
-  if (len === 6) {
-    isOrganik = true;
-  } else if (len >= 11) {
-    isOrganik = false;
-  } else if (isOrganikByStatus) {
+  // Prioritas: status pekerja > panjang NPP
+  if (isOrganikByStatus) {
     isOrganik = true;
   } else if (isNonOrganikByStatus) {
     isOrganik = false;
+  } else if (len === 6) {
+    // NPP 6 digit = organik (fallback jika status tidak dikenal)
+    isOrganik = true;
+  } else if (len >= 11) {
+    // NPP >= 11 digit = non organik (fallback)
+    isOrganik = false;
   } else {
+    // ── PERBAIKAN: jika status kosong & NPP tidak dikenal,
+    //    coba tebak dari panjang NPP, default non-organik
     isOrganik = false;
   }
 
@@ -133,6 +142,7 @@ const getOrganikKategori = (
   return { organik: label, kategori: label };
 };
 
+// ── PERBAIKAN: fixOrganikIfEmpty juga handle status_laporan_rakomdir (alias SPMT)
 function fixOrganikIfEmpty(item: any, entitas: string): any {
   const isKosong =
     !item.organik_non_organik ||
@@ -140,8 +150,14 @@ function fixOrganikIfEmpty(item: any, entitas: string): any {
     item.organik_non_organik === "-";
 
   if (isKosong) {
+    // Coba ambil status dari kedua field (SPMT pakai status_laporan_rakomdir alias)
+    const statusSumber =
+      item.status_laporan ||
+      item.status_laporan_rakomdir ||
+      "";
+
     const { organik, kategori } = getOrganikKategori(
-      item.status_laporan || "",
+      statusSumber,
       entitas,
       item.npp || ""
     );
@@ -203,7 +219,6 @@ function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
     jabatan: findIdx(["jabatan"]),
     gender: findIdx(["jenis kelamin", "gender"]),
     tanggal: findIdx(["tanggal lahir", "tgl lahir", "tgllahir"]),
-    // ✅ PERBAIKAN: tambah lebih banyak variasi nama kolom pendidikan
     pendidikan: findIdx([
       "pendidikan terakhir",
       "pendidikan akhir",
@@ -223,6 +238,8 @@ function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
       "status pekerja",
       "statuspekerja",
       "status_pekerja",
+      "status rakomdir",          // ← PERBAIKAN: tambah alias SPMT
+      "status_rakomdir",
       "status",
     ]),
     sdm: findIdx([
@@ -254,9 +271,9 @@ function parseRawFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
     const lokasiRaw = idx.lokasi !== -1 ? safe(row[idx.lokasi]) : "";
     const jabatanRaw = safe(row[idx.jabatan]);
 
+    // ── PERBAIKAN: generate organik SETELAH kita punya statusPekerja
     const { organik, kategori } = getOrganikKategori(statusPekerja, entitas, npp);
 
-    // ✅ Ambil nilai pendidikan dari kolom yang ditemukan
     const pendidikanRaw = idx.pendidikan !== -1 ? safe(row[idx.pendidikan]) : "";
     const pendidikanFinal = formatPendidikan(pendidikanRaw);
 
@@ -333,7 +350,14 @@ function parseResultFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
     unitKerja: findIdx(["unit kerja", "unitkerja", "lokasi"]),
     kategori: findIdx(["kategori"]),
     organik: findIdx(["organik"]),
-    statusLaporan: findIdx(["status laporan", "status pekerja", "status"]),
+    // ── PERBAIKAN: tambah alias "status rakomdir" untuk file SPMT
+    statusLaporan: findIdx([
+      "status laporan",
+      "status rakomdir",
+      "status_rakomdir",
+      "status pekerja",
+      "status",
+    ]),
     pusatPelayanan: findIdx(["pusat pelayanan"]),
     nonOperasional: findIdx(["non operasional", "operasional"]),
   };
@@ -352,6 +376,7 @@ function parseResultFormat(sheet: XLSX.WorkSheet, entitas: string): any[] {
     let organikFinal = idx.organik !== -1 ? safe(row[idx.organik]) : "";
     let kategoriFinal = idx.kategori !== -1 ? safe(row[idx.kategori]) : "";
 
+    // ── PERBAIKAN: selalu re-generate jika kosong atau "-"
     if (!organikFinal || organikFinal === "-" || !kategoriFinal || kategoriFinal === "-") {
       const { organik, kategori } = getOrganikKategori(statusLaporan, entitas, npp);
       if (!organikFinal || organikFinal === "-") organikFinal = organik;
@@ -421,6 +446,92 @@ function detectFormat(workbook: XLSX.WorkBook): "raw" | "result" {
   return "result";
 }
 
+// ══════════════════════════════════════════════════════════════
+// INSERT HELPERS
+// ══════════════════════════════════════════════════════════════
+
+async function insertNonSpmt(
+  conn: mysql.Connection,
+  table: string,
+  item: any,
+  bulan: string,
+  tahun: string
+) {
+  await conn.execute(
+    `INSERT INTO ${table}
+     (npp, nama, jabatan, unit_kerja, jenis_kelamin,
+      kategori, organik_non_organik, status_laporan,
+      pusat_pelayanan, non_operasional,
+      pendidikan, tanggal_lahir, entitas, bulan, tahun,
+      created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())`,
+    [
+      item.npp || "",
+      item.nama,
+      item.jabatan || "-",
+      item.unit_kerja,
+      item.jenis_kelamin,
+      item.kategori,
+      item.organik_non_organik,   // ← sudah pasti terisi setelah fixOrganikIfEmpty
+      item.status_laporan,
+      item.pusat_pelayanan,
+      item.non_operasional,
+      item.pendidikan || "-",
+      item.tanggal_lahir,
+      item.entitas,
+      bulan,
+      tahun,
+    ]
+  );
+}
+
+async function insertSpmt(
+  conn: mysql.Connection,
+  item: any,
+  bulan: string,
+  tahun: string
+) {
+  // ── PERBAIKAN KRITIS: pastikan organik_non_organik tidak kosong sebelum insert
+  //    Jika dashboard query GROUP BY organik_non_organik dari spmtdata,
+  //    nilai kosong/null akan muncul sebagai kategori terpisah yang tidak terhitung.
+  const organikFinal =
+    item.organik_non_organik && item.organik_non_organik !== "-"
+      ? item.organik_non_organik
+      : getOrganikKategori(item.status_laporan || "", item.entitas, item.npp || "").organik;
+
+  const kategoriFinal =
+    item.kategori && item.kategori !== "-"
+      ? item.kategori
+      : organikFinal;
+
+  await conn.execute(
+    `INSERT INTO spmtdata
+     (npp, nama, jabatan, unit_kerja, jenis_kelamin,
+      kategori, organik_non_organik, status_laporan_rakomdir,
+      pusat_pelayanan, non_operasional,
+      pendidikan, tanggal_lahir, entitas, bulan, tahun,
+      created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())`,
+    [
+      item.npp || "",
+      item.nama,
+      item.jabatan || "-",
+      item.unit_kerja,
+      item.jenis_kelamin,
+      kategoriFinal,              // ← PERBAIKAN: gunakan nilai yang sudah di-validate
+      organikFinal,               // ← PERBAIKAN: tidak akan pernah kosong/null
+      item.status_laporan,
+      item.pusat_pelayanan,
+      item.non_operasional,
+      item.pendidikan || "-",
+      item.tanggal_lahir,
+      item.entitas,
+      bulan,
+      tahun,
+    ]
+  );
+}
+
 // ===============================
 // MAIN POST HANDLER
 // ===============================
@@ -480,22 +591,34 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // FALLBACK: pastikan organik tidak kosong
+    // ── PERBAIKAN: fixOrganikIfEmpty jalan SEBELUM insert, pastikan tidak ada yang kosong
     finalData = finalData.map((item) => fixOrganikIfEmpty(item, type));
 
-    // ✅ DEBUG: log sample pendidikan
-    const pendidikanSample = finalData.slice(0, 5).map(d => ({ nama: d.nama, pendidikan: d.pendidikan }));
-    console.log("[upload-raw] Sample pendidikan:", pendidikanSample);
+    // ── Validasi akhir: log jika masih ada yang kosong (untuk debugging)
+    const masihKosong = finalData.filter(
+      (d) => !d.organik_non_organik || d.organik_non_organik === "" || d.organik_non_organik === "-"
+    );
+    if (masihKosong.length > 0) {
+      console.warn(`[upload-raw] ⚠️  ${masihKosong.length} baris organik_non_organik masih kosong setelah fix!`);
+      console.warn("[upload-raw] Sample:", masihKosong.slice(0, 3).map(d => ({ nama: d.nama, status: d.status_laporan, npp: d.npp })));
+    }
 
-    const kosong = finalData.filter((d) => !d.organik_non_organik || d.organik_non_organik === "").length;
+    // Debug log
+    const pendidikanSample = finalData.slice(0, 5).map(d => ({
+      nama: d.nama,
+      pendidikan: d.pendidikan,
+      organik: d.organik_non_organik,
+    }));
+    console.log("[upload-raw] Sample data:", pendidikanSample);
+
     const organik = finalData.filter((d) => d.organik_non_organik?.startsWith("Organik ")).length;
-    const nonOrg = finalData.filter((d) => d.organik_non_organik?.startsWith("Non Organik")).length;
-    // ✅ Hitung pendidikan yang berhasil diisi
+    const nonOrg  = finalData.filter((d) => d.organik_non_organik?.startsWith("Non Organik")).length;
+    const kosong  = finalData.filter((d) => !d.organik_non_organik || d.organik_non_organik === "").length;
     const pendidikanTerisi = finalData.filter((d) => d.pendidikan && d.pendidikan !== "-").length;
 
     console.log(`[upload-raw] Total=${finalData.length} Organik=${organik} NonOrganik=${nonOrg} Kosong=${kosong} PendidikanTerisi=${pendidikanTerisi}`);
 
-    // DATABASE
+    // ── DATABASE ─────────────────────────────────────────────
     const conn = await mysql.createConnection({
       host: process.env.DB_HOST || "127.0.0.1",
       user: process.env.DB_USER || "root",
@@ -505,10 +628,10 @@ export async function POST(req: NextRequest) {
     });
 
     const tableMap: Record<string, string> = {
-      TCU: "tcudata",
-      PTP: "ptpdata",
+      TCU:  "tcudata",
+      PTP:  "ptpdata",
       SPMT: "spmtdata",
-      IKT: "iktdata",
+      IKT:  "iktdata",
     };
 
     const table = tableMap[type];
@@ -520,48 +643,42 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ✅ Pastikan kolom pendidikan ada di tabel
+    // Pastikan kolom pendidikan ada
     try {
-      await conn.execute(`
-        ALTER TABLE ${table} 
-        ADD COLUMN IF NOT EXISTS pendidikan VARCHAR(100) NULL
-      `);
+      await conn.execute(
+        `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS pendidikan VARCHAR(100) NULL`
+      );
     } catch {
-      // Kolom sudah ada, abaikan error
+      // Kolom sudah ada — abaikan
     }
 
+    // ── PERBAIKAN: Pastikan kolom organik_non_organik & kategori ada di spmtdata
+    //    (mungkin belum ada jika tabel dibuat lama)
+    if (type === "SPMT") {
+      try {
+        await conn.execute(
+          `ALTER TABLE spmtdata
+           ADD COLUMN IF NOT EXISTS organik_non_organik VARCHAR(100) NULL,
+           ADD COLUMN IF NOT EXISTS kategori VARCHAR(100) NULL`
+        );
+      } catch {
+        // Kolom sudah ada — abaikan
+      }
+    }
+
+    // Hapus data lama
     await conn.execute(
-      `DELETE FROM ${table} WHERE bulan=? AND tahun=?`,
+      `DELETE FROM ${table} WHERE bulan = ? AND tahun = ?`,
       [bulan, tahun]
     );
 
+    // Insert data baru
     for (const item of finalData) {
-      await conn.execute(
-        `INSERT INTO ${table}
-         (npp, nama, jabatan, unit_kerja, jenis_kelamin,
-          kategori, organik_non_organik, status_laporan,
-          pusat_pelayanan, non_operasional,
-          pendidikan, tanggal_lahir, entitas, bulan, tahun,
-          created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())`,
-        [
-          item.npp || "",
-          item.nama,
-          item.jabatan || "-",
-          item.unit_kerja,
-          item.jenis_kelamin,
-          item.kategori,
-          item.organik_non_organik,
-          item.status_laporan,
-          item.pusat_pelayanan,
-          item.non_operasional,
-          item.pendidikan || "-",
-          item.tanggal_lahir,
-          item.entitas,
-          bulan,
-          tahun,
-        ]
-      );
+      if (type === "SPMT") {
+        await insertSpmt(conn, item, bulan, tahun);
+      } else {
+        await insertNonSpmt(conn, table, item, bulan, tahun);
+      }
     }
 
     await conn.end();
@@ -572,12 +689,14 @@ export async function POST(req: NextRequest) {
       format_detected: format,
       organik_count: organik,
       non_organik_count: nonOrg,
+      kosong_count: kosong,         // ← tambahan untuk debugging di frontend
       pendidikan_terisi: pendidikanTerisi,
       message:
         `Berhasil upload ${finalData.length} data ` +
         `(${format === "raw" ? "Data Mentah" : "Data Hasil"}). ` +
         `Organik: ${organik} | Non Organik: ${nonOrg} | Pendidikan terisi: ${pendidikanTerisi}`,
     });
+
   } catch (err) {
     console.error("[upload-raw] ERROR:", err);
     return NextResponse.json(
