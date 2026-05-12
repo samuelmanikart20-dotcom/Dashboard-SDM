@@ -1,9 +1,93 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function SettingsPage() {
   const [tab, setTab] = useState("profile");
+
+  // PROFILE FORM
+  const [profileForm, setProfileForm] = useState({
+    name: "",
+    email: "",
+  });
+
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  const [profileMessage, setProfileMessage] = useState({
+    type: "",
+    text: "",
+  });
+
+  // PASSWORD FORM
+  const [passwordForm, setPasswordForm] = useState({
+    email: "",
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+  const [emailNotif, setEmailNotif] = useState(true);
+
+  const [message, setMessage] = useState({
+    type: "",
+    text: "",
+  });
+
+  // =========================
+  // LOAD PREFERENCES
+  // =========================
+  useEffect(() => {
+    const savedDark = localStorage.getItem("darkMode");
+    const savedNotif = localStorage.getItem("emailNotif");
+
+    if (savedDark === "true") {
+      setDarkMode(true);
+    }
+
+    if (savedNotif === "false") {
+      setEmailNotif(false);
+    }
+  }, []);
+
+  // =========================
+  // APPLY DARK MODE ke <html>
+  // =========================
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, [darkMode]);
+
+  // =========================
+  // THEME COLORS (berdasarkan darkMode state)
+  // =========================
+  const theme = {
+    bg: darkMode ? "#0f172a" : "#f1f5f9",
+    card: darkMode ? "#1e293b" : "#ffffff",
+    cardBorder: darkMode ? "#334155" : "transparent",
+    text: darkMode ? "#f1f5f9" : "#111827",
+    textMuted: darkMode ? "#94a3b8" : "#6b7280",
+    textLabel: darkMode ? "#cbd5e1" : "#374151",
+    inputBg: darkMode ? "#0f172a" : "#ffffff",
+    inputBorder: darkMode ? "#475569" : "#d1d5db",
+    inputText: darkMode ? "#f1f5f9" : "#111827",
+    inputDisabledBg: darkMode ? "#1e293b" : "#f3f4f6",
+    inputDisabledText: darkMode ? "#64748b" : "#6b7280",
+    tabActiveBg: "#2563eb",
+    tabActiveText: "#ffffff",
+    tabInactiveBg: darkMode ? "#334155" : "#e5e7eb",
+    tabInactiveText: darkMode ? "#f1f5f9" : "#111827",
+    divider: darkMode ? "#334155" : "#e5e7eb",
+    headingH3: darkMode ? "#f8fafc" : "#111827",
+    tableHead: darkMode ? "#334155" : "#f9fafb",
+    tableText: darkMode ? "#cbd5e1" : "#374151",
+    tableBorder: darkMode ? "#475569" : "#e5e7eb",
+    apiInputBg: darkMode ? "#0f172a" : "#f9fafb",
+  };
 
   const tabs = [
     { id: "profile", label: "Profile" },
@@ -13,25 +97,180 @@ export default function SettingsPage() {
     { id: "api", label: "API Key" },
   ];
 
+  // UPDATE PROFILE
+  const handleUpdateProfile = async () => {
+    setProfileLoading(true);
+    setProfileMessage({ type: "", text: "" });
+
+    try {
+      const res = await fetch("/api/auth/update-profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profileForm),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setProfileMessage({
+          type: "error",
+          text: data.error || "Gagal update profile",
+        });
+        return;
+      }
+
+      const oldUser = localStorage.getItem("user");
+      if (oldUser) {
+        const parsedUser = JSON.parse(oldUser);
+        const updatedUser = {
+          ...parsedUser,
+          name: profileForm.name,
+          email: profileForm.email,
+        };
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+        window.location.reload();
+      }
+
+      setProfileMessage({ type: "success", text: "Profil berhasil diperbarui" });
+    } catch (error) {
+      setProfileMessage({ type: "error", text: "Terjadi kesalahan server" });
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  // CHANGE PASSWORD
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage({ type: "", text: "" });
+
+    try {
+      const res = await fetch("/api/auth/change-password", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(passwordForm),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMessage({
+          type: "error",
+          text: data.error || "Gagal mengubah password",
+        });
+        return;
+      }
+
+      setMessage({ type: "success", text: "Password berhasil diubah" });
+      setPasswordForm({
+        email: "",
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
+    } catch (error) {
+      setMessage({ type: "error", text: "Terjadi kesalahan server" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // HANDLE DARK MODE TOGGLE
+  const handleDarkModeToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.checked;
+    setDarkMode(value);
+    localStorage.setItem("darkMode", String(value));
+  };
+
+  const inputStyle = {
+    width: "100%",
+    padding: "14px",
+    borderRadius: "10px",
+    border: `1px solid ${theme.inputBorder}`,
+    fontSize: "15px",
+    background: theme.inputBg,
+    color: theme.inputText,
+    outline: "none",
+    boxSizing: "border-box" as const,
+  };
+
+  const labelStyle = {
+    display: "block",
+    marginBottom: "8px",
+    fontWeight: 500,
+    color: theme.textLabel,
+  };
+
+  const cardStyle = {
+    background: theme.card,
+    border: `1px solid ${theme.cardBorder}`,
+    padding: "30px",
+    borderRadius: "16px",
+    boxShadow: darkMode
+      ? "0 2px 12px rgba(0,0,0,0.4)"
+      : "0 2px 12px rgba(0,0,0,0.08)",
+    width: "100%",
+    boxSizing: "border-box" as const,
+  };
+
+  const primaryBtn = {
+    background: "#2563eb",
+    color: "white",
+    border: "none",
+    padding: "14px 24px",
+    borderRadius: "10px",
+    fontWeight: "bold" as const,
+    cursor: "pointer",
+    fontSize: "15px",
+    boxShadow: "0 4px 10px rgba(37,99,235,0.3)",
+  };
+
   return (
-    <div style={{ padding: "25px" }}>
-      <h2 style={{ fontSize: "22px", fontWeight: "bold", marginBottom: "20px" }}>
+    <div
+      style={{
+        padding: "25px",
+        minHeight: "100vh",
+        background: theme.bg,
+        transition: "background 0.3s ease, color 0.3s ease",
+        boxSizing: "border-box",
+      }}
+    >
+      <h2
+        style={{
+          fontSize: "30px",
+          fontWeight: "bold",
+          marginBottom: "25px",
+          color: theme.text,
+        }}
+      >
         Pengaturan Akun
       </h2>
 
       {/* TAB MENU */}
-      <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: "10px",
+          marginBottom: "25px",
+          flexWrap: "wrap",
+        }}
+      >
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             style={{
-              padding: "8px 15px",
-              borderRadius: "6px",
+              padding: "10px 18px",
+              borderRadius: "10px",
               border: "none",
               cursor: "pointer",
-              background: tab === t.id ? "#2563eb" : "#e5e7eb",
-              color: tab === t.id ? "white" : "black",
+              background:
+                tab === t.id ? theme.tabActiveBg : theme.tabInactiveBg,
+              color:
+                tab === t.id ? theme.tabActiveText : theme.tabInactiveText,
+              fontWeight: 500,
+              transition: "background 0.2s ease, color 0.2s ease",
             }}
           >
             {t.label}
@@ -41,103 +280,474 @@ export default function SettingsPage() {
 
       {/* PROFILE */}
       {tab === "profile" && (
-        <div className="card">
-          <h3>Profil User</h3>
+        <div style={cardStyle}>
+          <h3
+            style={{
+              fontSize: "24px",
+              fontWeight: "bold",
+              marginBottom: "25px",
+              color: theme.headingH3,
+            }}
+          >
+            Profil User
+          </h3>
 
-          <div style={{ marginTop: "15px" }}>
-            <label>Nama</label>
-            <input type="text" placeholder="Nama user" className="input" />
+          {/* FOTO */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "20px",
+              marginBottom: "30px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div
+              style={{
+                width: "100px",
+                height: "100px",
+                borderRadius: "50%",
+                background: "#2563eb",
+                color: "white",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "36px",
+                fontWeight: "bold",
+                flexShrink: 0,
+              }}
+            >
+              M
+            </div>
+
+            <div>
+              <p
+                style={{
+                  marginBottom: "10px",
+                  color: theme.textLabel,
+                  fontWeight: 500,
+                }}
+              >
+                Foto Profil
+              </p>
+              <input type="file" style={{ color: theme.text }} />
+              <p
+                style={{
+                  fontSize: "13px",
+                  color: theme.textMuted,
+                  marginTop: "8px",
+                }}
+              >
+                JPG, PNG maksimal 2MB
+              </p>
+            </div>
           </div>
 
-          <div style={{ marginTop: "15px" }}>
-            <label>Email</label>
-            <input type="email" placeholder="Email" className="input" />
+          {/* NAMA */}
+          <div style={{ marginBottom: "20px" }}>
+            <label style={labelStyle}>Nama Lengkap</label>
+            <input
+              type="text"
+              placeholder="Masukkan nama lengkap"
+              value={profileForm.name}
+              onChange={(e) =>
+                setProfileForm({ ...profileForm, name: e.target.value })
+              }
+              style={inputStyle}
+            />
           </div>
 
-          <div style={{ marginTop: "15px" }}>
-            <label>Upload Foto</label>
-            <input type="file" />
+          {/* EMAIL */}
+          <div style={{ marginBottom: "20px" }}>
+            <label style={labelStyle}>Email</label>
+            <input
+              type="email"
+              value={profileForm.email}
+              onChange={(e) =>
+                setProfileForm({ ...profileForm, email: e.target.value })
+              }
+              style={{
+                ...inputStyle,
+                background: theme.inputDisabledBg,
+                color: theme.inputDisabledText,
+              }}
+            />
           </div>
+
+          {/* BUTTON */}
+          <button
+            onClick={handleUpdateProfile}
+            disabled={profileLoading}
+            style={primaryBtn}
+          >
+            {profileLoading ? "Menyimpan..." : "Simpan Perubahan"}
+          </button>
+
+          {/* MESSAGE */}
+          {profileMessage.text && (
+            <div
+              style={{
+                marginTop: "15px",
+                padding: "12px",
+                borderRadius: "8px",
+                background:
+                  profileMessage.type === "success" ? "#dcfce7" : "#fee2e2",
+                color:
+                  profileMessage.type === "success" ? "#166534" : "#991b1b",
+              }}
+            >
+              {profileMessage.text}
+            </div>
+          )}
         </div>
       )}
 
       {/* SECURITY */}
       {tab === "security" && (
-        <div className="card">
-          <h3>Security</h3>
+        <div style={cardStyle}>
+          <h3
+            style={{
+              fontSize: "24px",
+              fontWeight: "bold",
+              marginBottom: "25px",
+              color: theme.headingH3,
+            }}
+          >
+            Keamanan Akun
+          </h3>
 
-          <div style={{ marginTop: "15px" }}>
-            <label>Password Baru</label>
-            <input type="password" className="input" />
-          </div>
+          <form onSubmit={handleChangePassword}>
+            {/* EMAIL */}
+            <div style={{ marginBottom: "18px" }}>
+              <label style={labelStyle}>Email</label>
+              <input
+                type="email"
+                placeholder="Masukkan email akun"
+                value={passwordForm.email}
+                onChange={(e) =>
+                  setPasswordForm({ ...passwordForm, email: e.target.value })
+                }
+                style={inputStyle}
+                required
+              />
+            </div>
 
-          <div style={{ marginTop: "15px" }}>
-            <label>Konfirmasi Password</label>
-            <input type="password" className="input" />
-          </div>
+            {/* PASSWORD LAMA */}
+            <div style={{ marginBottom: "18px" }}>
+              <label style={labelStyle}>Password Lama</label>
+              <input
+                type="password"
+                placeholder="Masukkan password lama"
+                value={passwordForm.currentPassword}
+                onChange={(e) =>
+                  setPasswordForm({
+                    ...passwordForm,
+                    currentPassword: e.target.value,
+                  })
+                }
+                style={inputStyle}
+                required
+              />
+            </div>
 
-          <button className="btn-primary" style={{ marginTop: "15px" }}>
-            Update Password
-          </button>
+            {/* PASSWORD BARU */}
+            <div style={{ marginBottom: "18px" }}>
+              <label style={labelStyle}>Password Baru</label>
+              <input
+                type="password"
+                placeholder="Masukkan password baru"
+                value={passwordForm.newPassword}
+                onChange={(e) =>
+                  setPasswordForm({
+                    ...passwordForm,
+                    newPassword: e.target.value,
+                  })
+                }
+                style={inputStyle}
+                required
+              />
+            </div>
+
+            {/* KONFIRMASI */}
+            <div style={{ marginBottom: "20px" }}>
+              <label style={labelStyle}>Konfirmasi Password Baru</label>
+              <input
+                type="password"
+                placeholder="Ulangi password baru"
+                value={passwordForm.confirmPassword}
+                onChange={(e) =>
+                  setPasswordForm({
+                    ...passwordForm,
+                    confirmPassword: e.target.value,
+                  })
+                }
+                style={inputStyle}
+                required
+              />
+            </div>
+
+            {/* MESSAGE */}
+            {message.text && (
+              <div
+                style={{
+                  marginBottom: "18px",
+                  padding: "12px",
+                  borderRadius: "8px",
+                  background:
+                    message.type === "success" ? "#dcfce7" : "#fee2e2",
+                  color:
+                    message.type === "success" ? "#166534" : "#991b1b",
+                }}
+              >
+                {message.text}
+              </div>
+            )}
+
+            {/* BUTTON */}
+            <button type="submit" disabled={loading} style={primaryBtn}>
+              {loading ? "Menyimpan..." : "Update Password"}
+            </button>
+          </form>
         </div>
       )}
 
       {/* PREFERENCES */}
       {tab === "preferences" && (
-        <div className="card">
-          <h3>Preferences</h3>
+        <div style={cardStyle}>
+          <h3
+            style={{
+              fontSize: "24px",
+              fontWeight: "bold",
+              marginBottom: "25px",
+              color: theme.headingH3,
+            }}
+          >
+            Preferences
+          </h3>
 
-          <div style={{ marginTop: "15px" }}>
-            <label>
-              <input type="checkbox" /> Dark Mode
+          {/* DARK MODE */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "18px 0",
+              borderBottom: `1px solid ${theme.divider}`,
+            }}
+          >
+            <div>
+              <h4 style={{ marginBottom: "5px", color: theme.text }}>
+                Dark Mode
+              </h4>
+              <p style={{ color: theme.textMuted, fontSize: "14px" }}>
+                Aktifkan tema gelap
+              </p>
+            </div>
+
+            {/* Toggle Switch — lebih user-friendly dari checkbox biasa */}
+            <label
+              style={{
+                position: "relative",
+                display: "inline-block",
+                width: "48px",
+                height: "26px",
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={darkMode}
+                onChange={handleDarkModeToggle}
+                style={{ opacity: 0, width: 0, height: 0 }}
+              />
+              <span
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: darkMode ? "#2563eb" : "#d1d5db",
+                  borderRadius: "34px",
+                  transition: "background 0.3s ease",
+                }}
+              />
+              <span
+                style={{
+                  position: "absolute",
+                  top: "3px",
+                  left: darkMode ? "25px" : "3px",
+                  width: "20px",
+                  height: "20px",
+                  background: "white",
+                  borderRadius: "50%",
+                  transition: "left 0.3s ease",
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+                }}
+              />
             </label>
           </div>
 
-          <div style={{ marginTop: "15px" }}>
-            <label>
-              <input type="checkbox" /> Email Notification
+          {/* EMAIL NOTIFICATION */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "18px 0",
+            }}
+          >
+            <div>
+              <h4 style={{ marginBottom: "5px", color: theme.text }}>
+                Email Notification
+              </h4>
+              <p style={{ color: theme.textMuted, fontSize: "14px" }}>
+                Terima notifikasi email
+              </p>
+            </div>
+
+            <label
+              style={{
+                position: "relative",
+                display: "inline-block",
+                width: "48px",
+                height: "26px",
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={emailNotif}
+                onChange={(e) => {
+                  const value = e.target.checked;
+                  setEmailNotif(value);
+                  localStorage.setItem("emailNotif", String(value));
+                }}
+                style={{ opacity: 0, width: 0, height: 0 }}
+              />
+              <span
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: emailNotif ? "#2563eb" : "#d1d5db",
+                  borderRadius: "34px",
+                  transition: "background 0.3s ease",
+                }}
+              />
+              <span
+                style={{
+                  position: "absolute",
+                  top: "3px",
+                  left: emailNotif ? "25px" : "3px",
+                  width: "20px",
+                  height: "20px",
+                  background: "white",
+                  borderRadius: "50%",
+                  transition: "left 0.3s ease",
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+                }}
+              />
             </label>
           </div>
         </div>
       )}
 
-      {/* ACTIVITY LOG */}
+      {/* ACTIVITY */}
       {tab === "activity" && (
-        <div className="card">
-          <h3>Activity Log</h3>
+        <div style={cardStyle}>
+          <h3
+            style={{
+              fontSize: "24px",
+              fontWeight: "bold",
+              marginBottom: "20px",
+              color: theme.headingH3,
+            }}
+          >
+            Activity Log
+          </h3>
 
-          <table style={{ width: "100%", marginTop: "15px" }}>
+          <table
+            style={{
+              width: "100%",
+              marginTop: "15px",
+              borderCollapse: "collapse",
+            }}
+          >
             <thead>
-              <tr>
-                <th>Waktu</th>
-                <th>Aktivitas</th>
-                <th>IP</th>
+              <tr style={{ background: theme.tableHead }}>
+                {["Waktu", "Aktivitas", "IP"].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      padding: "12px 16px",
+                      textAlign: "left",
+                      fontWeight: 600,
+                      color: theme.textLabel,
+                      borderBottom: `1px solid ${theme.tableBorder}`,
+                      fontSize: "14px",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td>2025-03-16</td>
-                <td>Login Dashboard</td>
-                <td>192.168.1.10</td>
+                {["2025-03-16", "Login Dashboard", "192.168.1.10"].map(
+                  (cell, i) => (
+                    <td
+                      key={i}
+                      style={{
+                        padding: "12px 16px",
+                        color: theme.tableText,
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        fontSize: "14px",
+                      }}
+                    >
+                      {cell}
+                    </td>
+                  )
+                )}
               </tr>
             </tbody>
           </table>
         </div>
       )}
 
-      {/* API KEY */}
+      {/* API */}
       {tab === "api" && (
-        <div className="card">
-          <h3>API Key</h3>
+        <div style={cardStyle}>
+          <h3
+            style={{
+              fontSize: "24px",
+              fontWeight: "bold",
+              marginBottom: "20px",
+              color: theme.headingH3,
+            }}
+          >
+            API Key
+          </h3>
 
           <input
             type="text"
             value="sk_test_123456789"
             readOnly
-            style={{ width: "100%", padding: "8px", marginTop: "10px" }}
+            style={{
+              ...inputStyle,
+              background: theme.apiInputBg,
+              color: theme.textMuted,
+              fontFamily: "monospace",
+              letterSpacing: "0.05em",
+            }}
           />
 
-          <button className="btn-primary" style={{ marginTop: "15px" }}>
+          <button
+            style={{
+              ...primaryBtn,
+              marginTop: "15px",
+              display: "block",
+            }}
+          >
             Generate API Key
           </button>
         </div>
