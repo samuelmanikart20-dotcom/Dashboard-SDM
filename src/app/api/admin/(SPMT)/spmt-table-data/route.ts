@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import mysql from 'mysql2/promise'
 import * as XLSX from 'xlsx'
 
-export const dynamic = "force-dynamic"; // 🔥 penting
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
 
@@ -42,40 +42,73 @@ export async function GET(request: NextRequest) {
       params.push(parseInt(year))
     }
 
-    // FILTER DAERAH
+    // FILTER DAERAH — gunakan kode seperti di dashboard-stats
     if (daerahId && daerahId !== '0') {
 
       const [daerahRows]: any = await connection.execute(
-        'SELECT nama FROM daerah WHERE id=?',
+        'SELECT nama, kode FROM daerah WHERE id = ?',
         [parseInt(daerahId)]
       )
 
       if (daerahRows.length > 0) {
-        const keyword = daerahRows[0].nama
-        where += ' AND unit_kerja LIKE ?'
-        params.push(`%${keyword}%`)
+        const daerahInfo = daerahRows[0]
+
+        // Mapping kode -> keyword unit_kerja (sama persis dengan dashboard-stats)
+        const kodeToKeyword: Record<string, string> = {
+          'BBLW': 'BELAWAN',
+          'BTJW': 'TANJUNG WANGI',
+          'BDMI': 'DUMAI',
+          'BTJI': 'TANJUNG INTAN',
+          'BBHG': 'BUMIHARJO',
+          'BMKS': 'MAKASSAR',
+          'BBLP': 'BALIKPAPAN',
+          'BJMR': 'JAMRUD NILAM',
+          'BTRI': 'TRISAKTI',
+          'BPRE': 'PARE-PARE',
+          'BTJE': 'TANJUNG EMAS',
+          'BLMB': 'LEMBAR',
+          'BGRS': 'GRESIK',
+          'BMLH': 'MALAHAYATI',
+          'BLHW': 'LHOKSEUMAWE',
+          'BNOA': 'BENOA',
+          'BSBG': 'SIBOLGA',
+          'BTBK': 'TANJUNG BALAI',
+          'BTPI': 'TANJUNG PINANG',
+          'BBMB': 'BIMA BADAS',
+          'KP':   'KANTOR PUSAT',
+        }
+
+        const unitKerjaFilter = kodeToKeyword[daerahInfo.kode]
+          || daerahInfo.nama.toUpperCase()
+
+        where += ' AND (unit_kerja LIKE ? OR unit_kerja LIKE ? OR entitas LIKE ?)'
+        params.push(
+          `%${unitKerjaFilter}%`,
+          `%SPMT-${unitKerjaFilter}%`,
+          `%${unitKerjaFilter}%`
+        )
       }
     }
 
-    // 🔥 AMBIL SEMUA DATA (untuk export)
+    // AMBIL SEMUA DATA
     const [allRows]: any = await connection.execute(
       `
       SELECT 
-      npp,
-      nama,
-      tanggal_lahir,
-      jabatan,
-      entitas,
-      unit_kerja,
-      kategori,
-      jenis_kelamin,
-      pendidikan,
-      organik_non_organik,
-      pusat_pelayanan,
-      non_operasional,
-      status_laporan_rakomdir,
-      bulan,
-      tahun
+        npp,
+        nama,
+        tanggal_lahir,
+        jabatan,
+        entitas,
+        unit_kerja,
+        kategori,
+        jenis_kelamin,
+        pendidikan,
+        organik_non_organik,
+        pusat_pelayanan,
+        non_operasional,
+        status_laporan_rakomdir,
+        bulan,
+        tahun
       FROM spmtdata
       ${where}
       ORDER BY nama ASC
@@ -83,7 +116,7 @@ export async function GET(request: NextRequest) {
       params
     )
 
-    // 🔥 EXPORT EXCEL
+    // EXPORT EXCEL
     if (exportExcel === 'excel') {
 
       const formatted = allRows.map((item: any) => ({
@@ -106,7 +139,6 @@ export async function GET(request: NextRequest) {
 
       const worksheet = XLSX.utils.json_to_sheet(formatted)
       const workbook = XLSX.utils.book_new()
-
       XLSX.utils.book_append_sheet(workbook, worksheet, 'SPMT')
 
       const buffer = XLSX.write(workbook, {
@@ -125,9 +157,8 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // 🔥 PAGINATION (TABLE VIEW)
+    // PAGINATION (TABLE VIEW)
     const total = allRows.length
-
     const paginatedRows = allRows.slice(offset, offset + limit)
 
     await connection.end()
@@ -139,7 +170,9 @@ export async function GET(request: NextRequest) {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit)
+        totalPages: Math.ceil(total / limit),
+        hasNext: offset + limit < total,
+        hasPrev: page > 1,
       }
     })
 
@@ -147,11 +180,15 @@ export async function GET(request: NextRequest) {
 
     console.error('SPMT TABLE API ERROR:', error)
 
+    if (connection) {
+      try { await connection.end() } catch {}
+    }
+
     return NextResponse.json({
-      success:false,
-      error:'Failed fetch spmt table',
+      success: false,
+      error: 'Failed fetch spmt table',
       debug: error instanceof Error ? error.message : error
-    },{status:500})
+    }, { status: 500 })
 
   }
 }
