@@ -12,9 +12,22 @@ export default function UploadRawDataPage() {
   const [showModal, setShowModal] = useState(false);
 
   const bulanList = [
-    "Januari","Februari","Maret","April","Mei","Juni",
-    "Juli","Agustus","September","Oktober","November","Desember"
+    "Januari",
+    "Februari",
+    "Maret",
+    "April",
+    "Mei",
+    "Juni",
+    "Juli",
+    "Agustus",
+    "September",
+    "Oktober",
+    "November",
+    "Desember",
   ];
+
+  // LIST TAHUN 2023 - 2036
+  const tahunList = Array.from({ length: 14 }, (_, i) => 2023 + i);
 
   const handleUpload = async () => {
     if (!file) return;
@@ -41,7 +54,6 @@ export default function UploadRawDataPage() {
       }
 
       alert("Upload berhasil!");
-
     } catch (err) {
       console.error(err);
       alert("Error upload");
@@ -53,7 +65,6 @@ export default function UploadRawDataPage() {
 
   return (
     <div className="p-6 space-y-6">
-
       {/* HEADER */}
       <div>
         <h1 className="text-2xl font-bold">Upload Data Mentah</h1>
@@ -78,28 +89,36 @@ export default function UploadRawDataPage() {
 
       {/* CARD */}
       <div className="bg-white p-6 rounded-xl shadow space-y-6">
-
         {/* PERIODE */}
         <div className="bg-gray-50 p-4 rounded-lg">
           <p className="font-semibold mb-3">Pilih Periode Data</p>
 
           <div className="grid grid-cols-2 gap-4">
+            {/* BULAN */}
             <select
               value={bulan}
               onChange={(e) => setBulan(Number(e.target.value))}
-              className="border px-3 py-2 rounded"
+              className="border px-3 py-2 rounded w-full"
             >
               {bulanList.map((b, i) => (
-                <option key={i} value={i + 1}>{b}</option>
+                <option key={i} value={i + 1}>
+                  {b}
+                </option>
               ))}
             </select>
 
-            <input
-              type="number"
+            {/* TAHUN */}
+            <select
               value={tahun}
               onChange={(e) => setTahun(Number(e.target.value))}
-              className="border px-3 py-2 rounded"
-            />
+              className="border px-3 py-2 rounded w-full"
+            >
+              {tahunList.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
           </div>
 
           <p className="text-sm text-gray-500 mt-2">
@@ -113,6 +132,7 @@ export default function UploadRawDataPage() {
         {/* JENIS DATA */}
         <div>
           <label className="block mb-2 font-medium">Jenis Data</label>
+
           <select
             value={type}
             onChange={(e) => setType(e.target.value)}
@@ -131,6 +151,7 @@ export default function UploadRawDataPage() {
           onClick={() => document.getElementById("fileInput")?.click()}
         >
           <p className="text-gray-500">Pilih file Excel atau CSV</p>
+
           <p className="text-sm text-gray-400 mt-1">
             Format: .xlsx, .xls, .csv (Max 10MB)
           </p>
@@ -163,16 +184,18 @@ export default function UploadRawDataPage() {
       {/* ================= MODAL ================= */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-
           <div className="bg-white p-6 rounded-xl w-[400px] text-center space-y-4">
-
             <div className="text-4xl">📤</div>
 
-            <h2 className="text-lg font-semibold">Konfirmasi Upload</h2>
+            <h2 className="text-lg font-semibold">
+              Konfirmasi Upload
+            </h2>
 
             <p>
               Anda akan mengupload data <b>{type}</b> untuk periode{" "}
-              <b>{bulan}/{tahun}</b>
+              <b>
+                {bulanList[bulan - 1]} {tahun}
+              </b>
             </p>
 
             <div className="bg-gray-100 p-3 rounded text-sm">
@@ -199,7 +222,6 @@ export default function UploadRawDataPage() {
                 Batal
               </button>
             </div>
-
           </div>
         </div>
       )}
