@@ -14,6 +14,7 @@ import {
   FileChartColumn,
   Settings,
   LogOut,
+  ArrowLeftRight,
 } from "lucide-react";
 
 const navigation = [
@@ -84,6 +85,12 @@ const navigation = [
         description: "Lihat struktur organisasi TCU (View Only)",
       },
     ],
+  },
+  {
+    name: "Mutasi SDM",
+    href: "/user/mutasi-sdm",
+    icon: ArrowLeftRight,
+    description: "Lihat data mutasi SDM",
   },
   {
     name: "Pengaturan",
