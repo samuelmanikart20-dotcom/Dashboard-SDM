@@ -9,6 +9,8 @@ import {
   FaBell,
   FaPalette,
   FaUser,
+  FaEye,
+  FaEyeSlash,
 } from "react-icons/fa";
 
 // =========================
@@ -141,6 +143,19 @@ export default function AdminSettingsPage() {
   const [message, setMessage] = useState("");
 
   // =========================
+  // PASSWORD VISIBILITY STATE
+  // =========================
+  const [showPasswords, setShowPasswords] = useState({
+    currentPassword: false,
+    newPassword: false,
+    confirmPassword: false,
+  });
+
+  const togglePasswordVisibility = (field: keyof typeof showPasswords) => {
+    setShowPasswords((prev) => ({ ...prev, [field]: !prev[field] }));
+  };
+
+  // =========================
   // THEME & LANGUAGE STATE
   // =========================
   const [darkMode, setDarkMode] = useState(false);
@@ -201,6 +216,7 @@ export default function AdminSettingsPage() {
     tabInactiveText: darkMode ? "#f1f5f9" : "#374151",
     tabInactiveHover: darkMode ? "#475569" : "#e5e7eb",
     selectBg: darkMode ? "#0f172a" : "#ffffff",
+    eyeIcon: darkMode ? "#94a3b8" : "#6b7280",
   };
 
   const tabs = [
@@ -328,6 +344,77 @@ export default function AdminSettingsPage() {
     </button>
   );
 
+  // =========================
+  // PASSWORD FIELD COMPONENT
+  // =========================
+  const PasswordField = ({
+    label,
+    fieldKey,
+  }: {
+    label: string;
+    fieldKey: "currentPassword" | "newPassword" | "confirmPassword";
+  }) => {
+    const isVisible = showPasswords[fieldKey];
+    return (
+      <div>
+        <label
+          style={{
+            display: "block",
+            fontSize: "14px",
+            fontWeight: 500,
+            marginBottom: "8px",
+            color: theme.textLabel,
+          }}
+        >
+          {label}
+        </label>
+        <div style={{ position: "relative" }}>
+          <input
+            type={isVisible ? "text" : "password"}
+            value={accountForm[fieldKey]}
+            onChange={(e) =>
+              setAccountForm({ ...accountForm, [fieldKey]: e.target.value })
+            }
+            className={inputClass}
+            style={{
+              ...inputStyle,
+              paddingRight: "44px", // ruang untuk icon
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => togglePasswordVisibility(fieldKey)}
+            style={{
+              position: "absolute",
+              right: "12px",
+              top: "50%",
+              transform: "translateY(-50%)",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: theme.eyeIcon,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "4px",
+              borderRadius: "4px",
+              transition: "color 0.2s ease",
+            }}
+            onMouseEnter={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.color = "#2563eb")
+            }
+            onMouseLeave={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.color =
+                theme.eyeIcon)
+            }
+          >
+            {isVisible ? <FaEyeSlash size={16} /> : <FaEye size={16} />}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div
       style={{
@@ -426,8 +513,7 @@ export default function AdminSettingsPage() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns:
-                    "repeat(auto-fit, minmax(240px, 1fr))",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
                   gap: "24px",
                 }}
               >
@@ -876,61 +962,67 @@ export default function AdminSettingsPage() {
                   maxWidth: "10000px",
                 }}
               >
-                {[
-                  {
-                    label: t.account.fullName,
-                    key: "name",
-                    type: "text",
-                  },
-                  {
-                    label: t.account.email,
-                    key: "email",
-                    type: "email",
-                  },
-                  {
-                    label: t.account.oldPassword,
-                    key: "currentPassword",
-                    type: "password",
-                  },
-                  {
-                    label: t.account.newPassword,
-                    key: "newPassword",
-                    type: "password",
-                  },
-                  {
-                    label: t.account.confirmPassword,
-                    key: "confirmPassword",
-                    type: "password",
-                  },
-                ].map(({ label, key, type }) => (
-                  <div key={key}>
-                    <label
-                      style={{
-                        display: "block",
-                        fontSize: "14px",
-                        fontWeight: 500,
-                        marginBottom: "8px",
-                        color: theme.textLabel,
-                      }}
-                    >
-                      {label}
-                    </label>
-                    <input
-                      type={type}
-                      value={
-                        accountForm[key as keyof typeof accountForm]
-                      }
-                      onChange={(e) =>
-                        setAccountForm({
-                          ...accountForm,
-                          [key]: e.target.value,
-                        })
-                      }
-                      className={inputClass}
-                      style={inputStyle}
-                    />
-                  </div>
-                ))}
+                {/* NAME */}
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "14px",
+                      fontWeight: 500,
+                      marginBottom: "8px",
+                      color: theme.textLabel,
+                    }}
+                  >
+                    {t.account.fullName}
+                  </label>
+                  <input
+                    type="text"
+                    value={accountForm.name}
+                    onChange={(e) =>
+                      setAccountForm({ ...accountForm, name: e.target.value })
+                    }
+                    className={inputClass}
+                    style={inputStyle}
+                  />
+                </div>
+
+                {/* EMAIL */}
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "14px",
+                      fontWeight: 500,
+                      marginBottom: "8px",
+                      color: theme.textLabel,
+                    }}
+                  >
+                    {t.account.email}
+                  </label>
+                  <input
+                    type="email"
+                    value={accountForm.email}
+                    onChange={(e) =>
+                      setAccountForm({ ...accountForm, email: e.target.value })
+                    }
+                    className={inputClass}
+                    style={inputStyle}
+                  />
+                </div>
+
+                {/* PASSWORD FIELDS — pakai PasswordField component */}
+                <PasswordField
+                  label={t.account.oldPassword}
+                  fieldKey="currentPassword"
+                />
+                <PasswordField
+                  label={t.account.newPassword}
+                  fieldKey="newPassword"
+                />
+                <PasswordField
+                  label={t.account.confirmPassword}
+                  fieldKey="confirmPassword"
+                />
 
                 <button
                   onClick={handleSaveAccount}
@@ -954,12 +1046,22 @@ export default function AdminSettingsPage() {
                     style={{
                       padding: "12px 16px",
                       borderRadius: "8px",
-                      background: message === t.account.success
-                        ? darkMode ? "#14532d" : "#dcfce7"
-                        : darkMode ? "#7f1d1d" : "#fee2e2",
-                      color: message === t.account.success
-                        ? darkMode ? "#86efac" : "#166534"
-                        : darkMode ? "#fca5a5" : "#991b1b",
+                      background:
+                        message === t.account.success
+                          ? darkMode
+                            ? "#14532d"
+                            : "#dcfce7"
+                          : darkMode
+                          ? "#7f1d1d"
+                          : "#fee2e2",
+                      color:
+                        message === t.account.success
+                          ? darkMode
+                            ? "#86efac"
+                            : "#166534"
+                          : darkMode
+                          ? "#fca5a5"
+                          : "#991b1b",
                       fontSize: "14px",
                     }}
                   >
