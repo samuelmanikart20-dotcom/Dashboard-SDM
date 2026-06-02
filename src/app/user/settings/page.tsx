@@ -2,10 +2,6 @@
 
 import { useState, useEffect } from "react";
 
-// =============================================
-// PasswordInput WAJIB di luar SettingsPage
-// Supaya tidak di-remount setiap ketik huruf
-// =============================================
 const PasswordInput = ({
   label,
   value,
@@ -45,7 +41,6 @@ const PasswordInput = ({
           style={{ ...inputStyle, paddingRight: "48px" }}
           required
         />
-        {/* Tombol icon mata */}
         <button
           type="button"
           onClick={() =>
@@ -69,14 +64,12 @@ const PasswordInput = ({
           aria-label={isVisible ? "Sembunyikan password" : "Tampilkan password"}
         >
           {isVisible ? (
-            // Icon mata dicoret = password sedang terlihat, klik untuk sembunyikan
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
               <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
               <line x1="1" y1="1" x2="23" y2="23" />
             </svg>
           ) : (
-            // Icon mata terbuka = password tersembunyi, klik untuk tampilkan
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
               <circle cx="12" cy="12" r="3" />
@@ -88,18 +81,13 @@ const PasswordInput = ({
   );
 };
 
-// =============================================
-// MAIN COMPONENT
-// =============================================
 export default function SettingsPage() {
   const [tab, setTab] = useState("profile");
 
-  // PROFILE FORM
   const [profileForm, setProfileForm] = useState({ name: "", email: "" });
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileMessage, setProfileMessage] = useState({ type: "", text: "" });
 
-  // PASSWORD FORM
   const [passwordForm, setPasswordForm] = useState({
     email: "",
     currentPassword: "",
@@ -107,7 +95,6 @@ export default function SettingsPage() {
     confirmPassword: "",
   });
 
-  // SHOW/HIDE PASSWORD STATE
   const [showPassword, setShowPassword] = useState({
     current: false,
     new: false,
@@ -119,7 +106,6 @@ export default function SettingsPage() {
   const [emailNotif, setEmailNotif] = useState(true);
   const [message, setMessage] = useState({ type: "", text: "" });
 
-  // LOAD PREFERENCES
   useEffect(() => {
     const savedDark = localStorage.getItem("darkMode");
     const savedNotif = localStorage.getItem("emailNotif");
@@ -127,7 +113,6 @@ export default function SettingsPage() {
     if (savedNotif === "false") setEmailNotif(false);
   }, []);
 
-  // APPLY DARK MODE ke <html>
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add("dark");
@@ -136,7 +121,6 @@ export default function SettingsPage() {
     }
   }, [darkMode]);
 
-  // THEME COLORS
   const theme = {
     bg: darkMode ? "#0f172a" : "#f1f5f9",
     card: darkMode ? "#1e293b" : "#ffffff",
@@ -213,7 +197,6 @@ export default function SettingsPage() {
     boxShadow: "0 4px 10px rgba(37,99,235,0.3)",
   };
 
-  // UPDATE PROFILE
   const handleUpdateProfile = async () => {
     setProfileLoading(true);
     setProfileMessage({ type: "", text: "" });
@@ -248,7 +231,6 @@ export default function SettingsPage() {
     }
   };
 
-  // CHANGE PASSWORD
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -278,7 +260,6 @@ export default function SettingsPage() {
     }
   };
 
-  // DARK MODE TOGGLE
   const handleDarkModeToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.checked;
     setDarkMode(value);
@@ -328,24 +309,6 @@ export default function SettingsPage() {
             Profil User
           </h3>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "20px", marginBottom: "30px", flexWrap: "wrap" }}>
-            <div
-              style={{
-                width: "100px", height: "100px", borderRadius: "50%",
-                background: "#2563eb", color: "white",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: "36px", fontWeight: "bold", flexShrink: 0,
-              }}
-            >
-              M
-            </div>
-            <div>
-              <p style={{ marginBottom: "10px", color: theme.textLabel, fontWeight: 500 }}>Foto Profil</p>
-              <input type="file" style={{ color: theme.text }} />
-              <p style={{ fontSize: "13px", color: theme.textMuted, marginTop: "8px" }}>JPG, PNG maksimal 2MB</p>
-            </div>
-          </div>
-
           <div style={{ marginBottom: "20px" }}>
             <label style={labelStyle}>Nama Lengkap</label>
             <input
@@ -393,7 +356,6 @@ export default function SettingsPage() {
           </h3>
 
           <form onSubmit={handleChangePassword}>
-            {/* EMAIL */}
             <div style={{ marginBottom: "18px" }}>
               <label style={labelStyle}>Email</label>
               <input
@@ -406,7 +368,6 @@ export default function SettingsPage() {
               />
             </div>
 
-            {/* PASSWORD LAMA */}
             <PasswordInput
               label="Password Lama"
               value={passwordForm.currentPassword}
@@ -420,7 +381,6 @@ export default function SettingsPage() {
               labelStyle={labelStyle}
             />
 
-            {/* PASSWORD BARU */}
             <PasswordInput
               label="Password Baru"
               value={passwordForm.newPassword}
@@ -434,7 +394,6 @@ export default function SettingsPage() {
               labelStyle={labelStyle}
             />
 
-            {/* KONFIRMASI PASSWORD BARU */}
             <PasswordInput
               label="Konfirmasi Password Baru"
               value={passwordForm.confirmPassword}
@@ -448,7 +407,6 @@ export default function SettingsPage() {
               labelStyle={labelStyle}
             />
 
-            {/* MESSAGE */}
             {message.text && (
               <div
                 style={{
@@ -475,7 +433,6 @@ export default function SettingsPage() {
             Preferences
           </h3>
 
-          {/* DARK MODE */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 0", borderBottom: `1px solid ${theme.divider}` }}>
             <div>
               <h4 style={{ marginBottom: "5px", color: theme.text }}>Dark Mode</h4>
@@ -488,7 +445,6 @@ export default function SettingsPage() {
             </label>
           </div>
 
-          {/* EMAIL NOTIFICATION */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 0" }}>
             <div>
               <h4 style={{ marginBottom: "5px", color: theme.text }}>Email Notification</h4>
