@@ -111,6 +111,56 @@ interface Period {
   type: "month" | "consolidation";
 }
 
+// ─── Helper: render satu donut chart ke data-URL PNG ──────────────────────────
+function renderDoughnutToDataURL(
+  nonOp: number,
+  op: number,
+  total: number
+): Promise<string> {
+  return new Promise((resolve) => {
+    const size = 200;
+    const offscreen = document.createElement("canvas");
+    offscreen.width = size;
+    offscreen.height = size;
+
+    const tempChart = new ChartJS(offscreen, {
+      type: "doughnut",
+      data: {
+        labels: ["Non Operasional", "Operasional"],
+        datasets: [
+          {
+            data: [nonOp, op],
+            backgroundColor: ["#93C5FD", "#1E40AF"],
+            borderWidth: 0,
+          },
+        ],
+      },
+      options: {
+        responsive: false,
+        animation: false,
+        plugins: {
+          legend: { display: false },
+          datalabels: {
+            formatter: (value: number) =>
+              `${total > 0 ? Math.round((value / total) * 100) : 0}%`,
+            color: "#fff",
+            font: { weight: "bold", size: 14 },
+            textAlign: "center",
+          },
+        },
+        cutout: "50%",
+      },
+    });
+
+    // Wait one tick so ChartJS finishes drawing
+    requestAnimationFrame(() => {
+      const url = offscreen.toDataURL("image/png");
+      tempChart.destroy();
+      resolve(url);
+    });
+  });
+}
+
 export default function AdminDashboard() {
   const [, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -142,22 +192,16 @@ export default function AdminDashboard() {
 
   const fetchMutasi = async () => {
     if (!selectedPeriod) return;
-
     const [monthPart, yearPart] = selectedPeriod.split("-");
     const selectedMonth = monthPart === "all" ? "" : monthPart;
     const selectedYear = yearPart;
-
     try {
       const params = new URLSearchParams();
       if (selectedMonth) params.append("bulan", selectedMonth);
       if (selectedYear) params.append("tahun", selectedYear);
-
       const response = await fetch(`/api/admin/mutasi-sdm?${params.toString()}`);
       const result = await response.json();
-
-      if (result.success) {
-        setMutasiData(result.data);
-      }
+      if (result.success) setMutasiData(result.data);
     } catch (error) {
       console.error("Error fetching mutasi data:", error);
       setMutasiData([]);
@@ -165,9 +209,7 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    if (selectedPeriod) {
-      fetchMutasi();
-    }
+    if (selectedPeriod) fetchMutasi();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriod]);
 
@@ -197,12 +239,8 @@ export default function AdminDashboard() {
       if (response.ok) {
         const data = await response.json();
         if (data.success) setRekapSDM(data.data || []);
-        else { console.error("[fetchRekapSDM] API returned success=false:", data); setRekapSDM([]); }
-      } else {
-        const errorText = await response.text().catch(() => "Unknown error");
-        console.error("[fetchRekapSDM] API error:", response.status, errorText);
-        setRekapSDM([]);
-      }
+        else setRekapSDM([]);
+      } else setRekapSDM([]);
     } catch (error) {
       console.error("[fetchRekapSDM] Error fetching rekap SDM:", error);
       setRekapSDM([]);
@@ -212,39 +250,22 @@ export default function AdminDashboard() {
   };
 
   const fetchRekapSDMEntitas = async (month?: string | null, year?: string) => {
-    if (!month || !year) {
-      setRekapSDMEntitas(null);
-      return;
-    }
-
+    if (!month || !year) { setRekapSDMEntitas(null); return; }
     setLoadingRekapEntitas(true);
-
     try {
       const entities = ["SPMT", "PTP", "IKT", "TCU"];
-
-      const results: any = {
-        spmt: [],
-        ptp: [],
-        ikt: [],
-        tcu: [],
-      };
-
+      const results: any = { spmt: [], ptp: [], ikt: [], tcu: [] };
       for (const entity of entities) {
         const params = new URLSearchParams();
         params.append("bulan", month);
         params.append("tahun", year);
         params.append("entitas", entity);
-
         const response = await fetch(`/api/admin/rekap-sdm-entitas?${params.toString()}`);
-
         if (response.ok) {
           const data = await response.json();
-          if (data.success) {
-            results[entity.toLowerCase()] = data.data || [];
-          }
+          if (data.success) results[entity.toLowerCase()] = data.data || [];
         }
       }
-
       setRekapSDMEntitas(results);
     } catch (error) {
       console.error("[fetchRekapSDMEntitas] Error:", error);
@@ -343,10 +364,10 @@ export default function AdminDashboard() {
       const month = monthPart === "all" ? null : monthPart;
       const year = yearPart;
 
-      if (!year) { console.error("Invalid period format:", selectedPeriod); setLoading(false); return; }
+      if (!year) { setLoading(false); return; }
       if (month) {
         const monthInt = parseInt(month);
-        if (isNaN(monthInt) || monthInt < 1 || monthInt > 12) { console.error("Invalid month value:", month); setLoading(false); return; }
+        if (isNaN(monthInt) || monthInt < 1 || monthInt > 12) { setLoading(false); return; }
       }
 
       fetchSDMOperasionalStats(month, year);
@@ -369,8 +390,8 @@ export default function AdminDashboard() {
         if (bigResp.ok) {
           const bigJson = await bigResp.json();
           setFullTableData(bigJson.data || []);
-        } else { setFullTableData([]); }
-      } catch (err) { console.error("Error fetching big table data:", err); setFullTableData([]); }
+        } else setFullTableData([]);
+      } catch (err) { setFullTableData([]); }
 
       const tableParams = new URLSearchParams();
       if (month) tableParams.append("month", month);
@@ -390,7 +411,7 @@ export default function AdminDashboard() {
             const bopoJson = await bopoResp.json();
             if (bopoJson?.success) bopoData = bopoJson.data as BopoData;
           }
-        } catch (err) { console.error("Error fetching BOPO data:", err); bopoData = null; }
+        } catch (err) { bopoData = null; }
       }
 
       const tableResp = await fetch(`/api/admin/combined-table-data?${tableParams.toString()}`);
@@ -407,7 +428,6 @@ export default function AdminDashboard() {
         });
         setBopo(bopoData);
       } else {
-        console.error("Failed to fetch combined data", { tableJson, statsJson });
         setStats({ totalEmployees: 0, tableData: [], chartData: defaultChartData });
         setBopo(null);
       }
@@ -435,53 +455,217 @@ export default function AdminDashboard() {
     setSelectedPeriod(event.target.value);
   };
 
-  const handleExportPDF = () => {
-    if (!dashboardRef.current) { alert("Tidak ada data untuk diekspor"); return; }
+  // ─── EXPORT PDF (html2canvas + jsPDF) ──────────────────────────────────────
+  const handleExportPDF = async () => {
+    if (!sdmOperasional) { alert("Data belum tersedia. Tunggu sebentar."); return; }
+
+    setExportingPDF(true);
+
     try {
-      setExportingPDF(true);
-      setTimeout(() => {
-        const canvases = dashboardRef.current?.querySelectorAll("canvas");
-        if (canvases && canvases.length > 0) {
-          canvases.forEach((canvas) => {
-            try {
-              const chartInstance = ChartJS.getChart(canvas as HTMLCanvasElement);
-              if (chartInstance) { chartInstance.update("none"); chartInstance.resize(); chartInstance.update("none"); }
-            } catch (e) { console.warn("Chart update warning:", e); }
-          });
-        }
-        const allElements = dashboardRef.current?.querySelectorAll('table, canvas, div[class*="bg-white"], div[class*="h-32"]');
-        if (allElements) {
-          allElements.forEach((el) => {
-            const htmlEl = el as HTMLElement;
-            htmlEl.style.display = ""; htmlEl.style.visibility = ""; htmlEl.style.opacity = "";
-            if (el.tagName === "CANVAS") {
-              const canvasEl = el as HTMLCanvasElement;
-              if (canvasEl.width === 0 || canvasEl.height === 0) { canvasEl.width = canvasEl.offsetWidth || 300; canvasEl.height = canvasEl.offsetHeight || 128; }
-            }
-          });
-        }
-        const allCanvases = dashboardRef.current?.querySelectorAll("canvas");
-        if (allCanvases) {
-          allCanvases.forEach((canvas) => {
-            const canvasEl = canvas as HTMLCanvasElement;
-            canvasEl.style.display = "block"; canvasEl.style.visibility = "visible"; canvasEl.style.opacity = "1";
-            canvasEl.style.width = "100%"; canvasEl.style.height = "128px"; canvasEl.style.minHeight = "128px";
-            if (canvasEl.width === 0 || canvasEl.height === 0) {
-              const parent = canvasEl.parentElement;
-              if (parent) { canvasEl.width = parent.clientWidth || 300; canvasEl.height = 128; }
-            }
-            const chartInstance = ChartJS.getChart(canvasEl);
-            if (chartInstance) { chartInstance.update("none"); chartInstance.resize(); }
-          });
-        }
-        setTimeout(() => {
-          window.print();
-          setExportingPDF(false);
-        }, 2000);
-      }, 500);
+      // Dynamic import agar tidak mempengaruhi bundle size saat runtime normal
+      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+        import("jspdf"),
+        import("html2canvas"),
+      ]);
+
+      const bulan = parseInt(selectedPeriod.split("-")[0]);
+      const tahun = parseInt(selectedPeriod.split("-")[1]);
+      const bulanName = bulanNames[bulan - 1] ?? "";
+
+      // 1. Render semua 4 donut chart ke PNG di luar DOM
+      const entities = ["spmt", "ptp", "ikt", "tcu"] as const;
+      const chartImages: Record<string, string> = {};
+      for (const key of entities) {
+        const d = sdmOperasional[key];
+        chartImages[key] = await renderDoughnutToDataURL(d.nonOperasional, d.operasional, d.total);
+      }
+
+      // 2. Buat hidden print container
+      const printContainer = document.createElement("div");
+      printContainer.id = "pdf-print-container";
+      printContainer.style.cssText = `
+        position: fixed; top: -9999px; left: -9999px;
+        width: 1100px; background: #ffffff;
+        font-family: Arial, sans-serif; font-size: 12px; color: #000;
+        padding: 24px;
+      `;
+
+      // ── Header ──
+      const totalRow = rekapSDM.find((r) => r.status === "Jumlah");
+      const totalKaryawan = totalRow ? totalRow.realisasiBulanIni : 0;
+
+      printContainer.innerHTML = `
+        <div style="margin-bottom:12px;">
+          <div style="font-size:18px;font-weight:bold;">DEMOGRAFI SDM</div>
+          <div style="font-size:13px;color:#555;">PT PELINDO MULTI TERMINAL GRUP</div>
+        </div>
+
+        <!-- Tabel Rekap Konsolidasi -->
+        ${rekapSDM.length > 0 ? `
+        <div style="margin-bottom:24px;">
+          <div style="font-size:14px;font-weight:bold;text-align:center;margin-bottom:10px;">
+            Realisasi Jumlah SDM PT Pelindo Multi Terminal (Konsolidasi) s.d ${bulanName} ${tahun} sebesar ${totalKaryawan.toLocaleString("id-ID")} Orang
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:11px;">
+            <thead>
+              <tr style="background:#1e40af;color:#fff;">
+                <th style="border:1px solid #999;padding:6px 8px;text-align:left;min-width:220px;">STATUS</th>
+                <th style="border:1px solid #999;padding:6px 4px;text-align:left;">SATUAN</th>
+                <th style="border:1px solid #999;padding:6px 4px;text-align:center;">REALISASI ${bulanNamesUpper[bulan - 1]} TH.${tahun - 1}</th>
+                <th style="border:1px solid #999;padding:6px 4px;text-align:center;">RKAP TH.${tahun}</th>
+                <th style="border:1px solid #999;padding:6px 4px;text-align:center;">REALISASI ${bulan === 1 ? bulanNamesUpper[11] : bulanNamesUpper[bulan - 2]} TH.${bulan === 1 ? tahun - 1 : tahun}</th>
+                <th style="border:1px solid #999;padding:6px 4px;text-align:center;">REALISASI S.D ${bulanNamesUpper[bulan - 1]} TH.${tahun}</th>
+                <th style="border:1px solid #999;padding:6px 4px;text-align:center;">YoY (%)</th>
+                <th style="border:1px solid #999;padding:6px 4px;text-align:center;">FY ${tahun} (%)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rekapSDM.map((row) => {
+                const isTotal = row.status === "Jumlah";
+                const bg = isTotal ? "background:#f3f4f6;font-weight:bold;" : "";
+                return `<tr style="${bg}">
+                  <td style="border:1px solid #ccc;padding:5px 8px;">${row.status}</td>
+                  <td style="border:1px solid #ccc;padding:5px 4px;">${row.satuan}</td>
+                  <td style="border:1px solid #ccc;padding:5px 4px;text-align:right;">${row.realisasiTahunLalu > 0 ? row.realisasiTahunLalu.toLocaleString("id-ID") : "-"}</td>
+                  <td style="border:1px solid #ccc;padding:5px 4px;text-align:right;">${row.revisiRKAP !== null && row.revisiRKAP > 0 ? row.revisiRKAP.toLocaleString("id-ID") : "-"}</td>
+                  <td style="border:1px solid #ccc;padding:5px 4px;text-align:right;">${row.realisasiBulanSebelumnya > 0 ? row.realisasiBulanSebelumnya.toLocaleString("id-ID") : "-"}</td>
+                  <td style="border:1px solid #ccc;padding:5px 4px;text-align:right;">${row.realisasiBulanIni > 0 ? row.realisasiBulanIni.toLocaleString("id-ID") : "-"}</td>
+                  <td style="border:1px solid #ccc;padding:5px 4px;text-align:right;">${row.capaianYoY !== null ? row.capaianYoY + "%" : "-"}</td>
+                  <td style="border:1px solid #ccc;padding:5px 4px;text-align:right;">${row.capaianFY !== null ? row.capaianFY + "%" : "-"}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>` : ""}
+
+        <!-- Rekap Per Entitas (semua 4 entitas) -->
+        ${rekapSDMEntitas ? `
+        <div style="margin-bottom:24px;">
+          <div style="font-size:14px;font-weight:bold;text-align:center;margin-bottom:10px;">
+            REKAPITULASI SDM PER ENTITAS
+          </div>
+          ${(["spmt", "ptp", "ikt", "tcu"] as const).map((key) => {
+            const rows = rekapSDMEntitas[key] ?? [];
+            if (rows.length === 0) return "";
+            const totalR = rows.find((r) => r.status === "Jumlah");
+            return `
+              <div style="margin-bottom:14px;">
+                <div style="font-size:12px;font-weight:bold;margin-bottom:4px;">${key.toUpperCase()} — Realisasi s.d ${bulanName} ${tahun}: ${(totalR?.realisasi ?? 0).toLocaleString("id-ID")} Orang</div>
+                <table style="width:100%;border-collapse:collapse;font-size:10px;">
+                  <thead>
+                    <tr style="background:#1e40af;color:#fff;">
+                      <th style="border:1px solid #999;padding:5px 8px;text-align:left;">STATUS SDM</th>
+                      <th style="border:1px solid #999;padding:5px 4px;text-align:left;">SATUAN</th>
+                      <th style="border:1px solid #999;padding:5px 4px;text-align:center;">RKAP ${tahun}</th>
+                      <th style="border:1px solid #999;padding:5px 4px;text-align:center;">REALISASI S.D ${bulanNamesUpper[bulan - 1]} ${tahun}</th>
+                      <th style="border:1px solid #999;padding:5px 4px;text-align:center;">SELISIH</th>
+                      <th style="border:1px solid #999;padding:5px 4px;text-align:center;">CAPAIAN (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${rows.map((row) => {
+                      const isTotal = row.status === "Jumlah";
+                      const bg = isTotal ? "background:#f3f4f6;font-weight:bold;" : "";
+                      const selisihColor = row.selisih !== null && row.selisih < 0 ? "color:#dc2626;" : row.selisih !== null && row.selisih > 0 ? "color:#16a34a;" : "";
+                      const capaianColor = row.capaian !== null && row.capaian >= 100 ? "color:#16a34a;" : row.capaian !== null && row.capaian >= 90 ? "color:#ca8a04;" : row.capaian !== null ? "color:#dc2626;" : "";
+                      return `<tr style="${bg}">
+                        <td style="border:1px solid #ccc;padding:4px 8px;">${row.status}</td>
+                        <td style="border:1px solid #ccc;padding:4px;">${row.satuan}</td>
+                        <td style="border:1px solid #ccc;padding:4px;text-align:right;">${row.rkap !== null && row.rkap > 0 ? row.rkap.toLocaleString("id-ID") : "-"}</td>
+                        <td style="border:1px solid #ccc;padding:4px;text-align:right;">${row.realisasi > 0 ? row.realisasi.toLocaleString("id-ID") : "-"}</td>
+                        <td style="border:1px solid #ccc;padding:4px;text-align:right;${selisihColor}">${row.selisih !== null ? row.selisih.toLocaleString("id-ID") : "-"}</td>
+                        <td style="border:1px solid #ccc;padding:4px;text-align:right;${capaianColor}">${row.capaian !== null ? row.capaian.toFixed(2) + "%" : "-"}</td>
+                      </tr>`;
+                    }).join("")}
+                  </tbody>
+                </table>
+              </div>`;
+          }).join("")}
+        </div>` : ""}
+
+        <!-- Persentase Jumlah SDM (Donut Charts as images) -->
+        <div style="margin-bottom:16px;">
+          <div style="font-size:14px;font-weight:bold;text-align:center;margin-bottom:12px;">
+            PERSENTASE JUMLAH SDM
+          </div>
+          <div style="display:flex;gap:16px;justify-content:space-between;">
+            ${(["spmt", "ptp", "ikt", "tcu"] as const).map((key) => {
+              const d = sdmOperasional[key];
+              return `
+                <div style="flex:1;text-align:center;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">
+                  <div style="font-weight:bold;margin-bottom:8px;font-size:11px;">JUMLAH SDM ${key.toUpperCase()}</div>
+                  <img src="${chartImages[key]}" style="width:120px;height:120px;display:block;margin:0 auto 8px;" />
+                  <div style="font-size:16px;font-weight:bold;margin-bottom:6px;">${d.total.toLocaleString("id-ID")} Org</div>
+                  <div style="display:flex;justify-content:space-between;background:#EFF6FF;padding:4px 8px;border-radius:4px;margin-bottom:4px;font-size:10px;">
+                    <span>Non Operasional</span><strong>${d.nonOperasional.toLocaleString("id-ID")} Org</strong>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;background:#DBEAFE;padding:4px 8px;border-radius:4px;font-size:10px;">
+                    <span>Operasional</span><strong>${d.operasional.toLocaleString("id-ID")} Org</strong>
+                  </div>
+                </div>`;
+            }).join("")}
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(printContainer);
+
+      // 3. html2canvas → jsPDF
+      await new Promise((r) => setTimeout(r, 300)); // beri waktu browser render
+
+      const canvas = await html2canvas(printContainer, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+        width: 1100,
+        windowWidth: 1100,
+      });
+
+      document.body.removeChild(printContainer);
+
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+      const pageW = pdf.internal.pageSize.getWidth();   // 210 mm
+      const pageH = pdf.internal.pageSize.getHeight();  // 297 mm
+      const margin = 10; // mm
+
+      const contentW = pageW - margin * 2;
+      const imgW = canvas.width;
+      const imgH = canvas.height;
+      const ratio = contentW / (imgW / (96 / 25.4)); // px → mm at 96 dpi
+
+      // Jika konten lebih panjang dari 1 halaman, split ke beberapa halaman
+      const pxPerMm = imgW / contentW;
+      const pageHeightPx = (pageH - margin * 2) * pxPerMm;
+      let yOffset = 0;
+      let pageNum = 0;
+
+      while (yOffset < imgH) {
+        if (pageNum > 0) pdf.addPage();
+
+        // Crop slice canvas untuk halaman ini
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = imgW;
+        sliceCanvas.height = Math.min(pageHeightPx, imgH - yOffset);
+        const ctx = sliceCanvas.getContext("2d")!;
+        ctx.drawImage(canvas, 0, -yOffset);
+        const sliceData = sliceCanvas.toDataURL("image/png");
+
+        const sliceHeightMm = (sliceCanvas.height / pxPerMm);
+        pdf.addImage(sliceData, "PNG", margin, margin, contentW, sliceHeightMm);
+
+        yOffset += pageHeightPx;
+        pageNum++;
+      }
+
+      const periodLabel = availablePeriods.find((p) => p.value === selectedPeriod)?.label ?? selectedPeriod;
+      pdf.save(`Demografi_SDM_${periodLabel.replace(/\s+/g, "_")}.pdf`);
     } catch (error) {
       console.error("Error exporting to PDF:", error);
-      alert("Gagal mengekspor ke PDF. Silakan coba lagi.");
+      alert("Gagal mengekspor ke PDF. Pastikan library html2canvas dan jspdf sudah terinstall:\nnpm install html2canvas jspdf");
+    } finally {
       setExportingPDF(false);
     }
   };
@@ -577,7 +761,7 @@ export default function AdminDashboard() {
                 </select>
               </div>
 
-              {/* ── TOMBOL DATA MUTASI (baru) ── */}
+              {/* Tombol Data Mutasi */}
               <Link
                 href="/admin/mutasi"
                 className="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded shadow flex items-center justify-center gap-2 text-sm sm:text-base whitespace-nowrap transition-colors"
@@ -590,7 +774,7 @@ export default function AdminDashboard() {
                 <span className="sm:hidden">Mutasi</span>
               </Link>
 
-              {/* Tombol Export PDF (tidak berubah) */}
+              {/* Tombol Export PDF */}
               <button
                 onClick={handleExportPDF}
                 disabled={exportingPDF}
@@ -758,7 +942,7 @@ export default function AdminDashboard() {
               })()}
             </p>
 
-            {/* Tabs SPMT / PTP / IKT / TCU */}
+            {/* Tabs */}
             <div className="flex gap-2 mb-6 border-b border-gray-200 rekap-entitas-tabs">
               {ENTITAS_TABS.map((tab) => (
                 <button
@@ -998,33 +1182,6 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
-
-      {/* Print Styles */}
-      <style dangerouslySetInnerHTML={{ __html: `
-      @page { margin: 0; size: auto; }
-      @media print {
-        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
-        nav, nav * { display: none !important; }
-        aside, [class*="sidebar"], [class*="Sidebar"] { display: none !important; visibility: hidden !important; width: 0 !important; height: 0 !important; }
-        .rekap-entitas-tabs { display: none !important; }
-        button[onclick*="handleExportPDF"], select, div[class*="bg-blue-500"]:has(select), input[type="number"] { display: none !important; visibility: hidden !important; width: 0 !important; height: 0 !important; opacity: 0 !important; }
-        .grid.grid-cols-1.lg\\:grid-cols-4 { display: none !important; }
-        body, html { background-color: #ffffff !important; margin: 0 !important; padding: 0 !important; }
-        @page { margin: 0.5cm !important; background: white !important; }
-        table, table thead, table tbody, table tr, table th, table td { display: table !important; visibility: visible !important; opacity: 1 !important; border: 1px solid #000000 !important; border-collapse: collapse !important; }
-        table thead { display: table-header-group !important; }
-        table tbody { display: table-row-group !important; }
-        table tr { display: table-row !important; }
-        table th, table td { display: table-cell !important; padding: 8px !important; border: 1px solid #000000 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        table th[class*="bg-blue-700"] { background-color: #1e40af !important; color: #ffffff !important; }
-        table tr[class*="bg-gray-100"] { background-color: #f3f4f6 !important; }
-        canvas { display: block !important; visibility: visible !important; opacity: 1 !important; width: 100% !important; height: 128px !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        div[class*="h-32"] { height: 128px !important; min-height: 128px !important; display: block !important; }
-        div[class*="grid"][class*="lg:grid-cols-4"] { display: grid !important; grid-template-columns: repeat(4, minmax(0, 1fr)) !important; gap: 1.5rem !important; }
-        h1, h2, h3, h4, h5, h6, span, p { display: block !important; visibility: visible !important; color: #000000 !important; }
-        div[class*="animate-spin"] { display: none !important; }
-      }
-      ` }} />
     </div>
   );
 }
