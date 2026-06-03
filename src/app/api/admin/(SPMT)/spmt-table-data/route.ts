@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import mysql from 'mysql2/promise'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 
 export const dynamic = "force-dynamic";
 
@@ -11,12 +11,10 @@ export async function GET(request: NextRequest) {
   try {
 
     const { searchParams } = new URL(request.url)
-
     const month = searchParams.get('month')
     const year = searchParams.get('year')
     const daerahId = searchParams.get('daerah_id')
     const exportExcel = searchParams.get('export')
-
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '100')
     const offset = (page - 1) * limit
@@ -42,9 +40,13 @@ export async function GET(request: NextRequest) {
       params.push(parseInt(year))
     }
 
-    // FILTER DAERAH — gunakan kode seperti di dashboard-stats
-    if (daerahId && daerahId !== '0') {
+    const bulanNames = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
+    const bulanName = month ? (bulanNames[parseInt(month)] || month) : 'Semua'
 
+    let daerahLabel = 'SPMT (Semua Branch)'
+
+    if (daerahId && daerahId !== '0') {
       const [daerahRows]: any = await connection.execute(
         'SELECT nama, kode FROM daerah WHERE id = ?',
         [parseInt(daerahId)]
@@ -52,8 +54,8 @@ export async function GET(request: NextRequest) {
 
       if (daerahRows.length > 0) {
         const daerahInfo = daerahRows[0]
+        daerahLabel = daerahInfo.nama
 
-        // Mapping kode -> keyword unit_kerja (sama persis dengan dashboard-stats)
         const kodeToKeyword: Record<string, string> = {
           'BBLW': 'BELAWAN',
           'BTJW': 'TANJUNG WANGI',
@@ -78,9 +80,7 @@ export async function GET(request: NextRequest) {
           'KP':   'KANTOR PUSAT',
         }
 
-        const unitKerjaFilter = kodeToKeyword[daerahInfo.kode]
-          || daerahInfo.nama.toUpperCase()
-
+        const unitKerjaFilter = kodeToKeyword[daerahInfo.kode] || daerahInfo.nama.toUpperCase()
         where += ' AND (unit_kerja LIKE ? OR unit_kerja LIKE ? OR entitas LIKE ?)'
         params.push(
           `%${unitKerjaFilter}%`,
@@ -90,86 +90,149 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // AMBIL SEMUA DATA
     const [allRows]: any = await connection.execute(
-      `
-      SELECT 
-        npp,
-        nama,
-        tanggal_lahir,
-        jabatan,
-        entitas,
-        unit_kerja,
-        kategori,
-        jenis_kelamin,
-        pendidikan,
-        organik_non_organik,
-        pusat_pelayanan,
-        non_operasional,
-        status_laporan_rakomdir,
-        bulan,
-        tahun
+      `SELECT
+        npp, nama, tanggal_lahir, jabatan, entitas, unit_kerja, kategori,
+        jenis_kelamin, pendidikan, organik_non_organik, pusat_pelayanan,
+        non_operasional, status_laporan_rakomdir, bulan, tahun
       FROM spmtdata
       ${where}
-      ORDER BY nama ASC
-      `,
+      ORDER BY nama ASC`,
       params
     )
 
-    // EXPORT EXCEL
+    // ============================================================
+    // EXPORT EXCEL RAPI
+    // ============================================================
     if (exportExcel === 'excel') {
 
-      const formatted = allRows.map((item: any) => ({
-        NPP: item.npp,
-        Nama: item.nama,
-        "Tanggal Lahir": item.tanggal_lahir,
-        Jabatan: item.jabatan,
-        Entitas: item.entitas,
-        "Unit Kerja": item.unit_kerja,
-        Kategori: item.kategori,
-        "Jenis Kelamin": item.jenis_kelamin,
-        Pendidikan: item.pendidikan,
-        "Organik/Non Organik": item.organik_non_organik,
-        "Pusat Pelayanan": item.pusat_pelayanan,
-        "Non Operasional": item.non_operasional,
-        "Status Laporan": item.status_laporan_rakomdir,
-        Bulan: item.bulan,
-        Tahun: item.tahun,
-      }))
+      const wb = new ExcelJS.Workbook()
+      const ws = wb.addWorksheet('DEMOGRAFI SDM')
 
-      const worksheet = XLSX.utils.json_to_sheet(formatted)
-      const workbook = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'SPMT')
+      const GREEN      = '1A5C38'
+      const GREEN_SUB  = 'D9EAD3'
+      const GREEN_ROW  = 'EAF4EA'
+      const WHITE      = 'FFFFFF'
+      const NCOLS      = 15
 
-      const buffer = XLSX.write(workbook, {
-        type: 'buffer',
-        bookType: 'xlsx',
+      const thin: Partial<ExcelJS.Borders> = {
+        top:    { style: 'thin' as ExcelJS.BorderStyle },
+        left:   { style: 'thin' as ExcelJS.BorderStyle },
+        bottom: { style: 'thin' as ExcelJS.BorderStyle },
+        right:  { style: 'thin' as ExcelJS.BorderStyle },
+      }
+
+      const C = { h: 'center' as const, v: 'middle' as const, wrapText: true }
+      const L = { h: 'left'   as const, v: 'middle' as const, wrapText: true }
+
+      // --- BARIS 1: JUDUL UTAMA ---
+      ws.mergeCells(1, 1, 1, NCOLS)
+      const b1 = ws.getCell('A1')
+      b1.value     = 'DEMOGRAFI SDM - SPMT PELINDO'
+      b1.font      = { name: 'Arial', bold: true, size: 14, color: { argb: WHITE } }
+      b1.alignment = { horizontal: 'center', vertical: 'middle' }
+      b1.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: GREEN } }
+      ws.getRow(1).height = 32
+
+      // --- BARIS 2: SUB JUDUL ---
+      ws.mergeCells(2, 1, 2, NCOLS)
+      const b2 = ws.getCell('A2')
+      b2.value     = `Entitas: SPMT  |  Bulan: ${bulanName}  |  Tahun: ${year || ''}`
+      b2.font      = { name: 'Arial', size: 11, color: { argb: '000000' } }
+      b2.alignment = { horizontal: 'center', vertical: 'middle' }
+      b2.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: GREEN_SUB } }
+      ws.getRow(2).height = 22
+
+      // --- BARIS 3: KOSONG ---
+      ws.getRow(3).height = 8
+
+      // --- BARIS 4: HEADER ---
+      const headers = [
+        'No', 'NPP', 'Nama', 'Tanggal Lahir', 'Jabatan', 'Entitas',
+        'Unit Kerja', 'Kategori', 'Jenis Kelamin', 'Pendidikan',
+        'Organik/Non Organik', 'Pusat Pelayanan', 'Non Operasional',
+        'Status Laporan', 'Bulan'
+      ]
+      ws.getRow(4).height = 36
+      headers.forEach((h, i) => {
+        const cell     = ws.getRow(4).getCell(i + 1)
+        cell.value     = h
+        cell.font      = { name: 'Arial', bold: true, size: 11, color: { argb: WHITE } }
+        cell.alignment = C
+        cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: GREEN } }
+        cell.border    = thin
       })
 
+      // --- BARIS DATA ---
+      allRows.forEach((item: any, idx: number) => {
+        const row = ws.getRow(idx + 5)
+        row.height    = 18
+        const bg      = idx % 2 === 0 ? GREEN_ROW : WHITE
+
+        const tgl = item.tanggal_lahir
+          ? new Date(item.tanggal_lahir).toLocaleDateString('id-ID', {
+              day: '2-digit', month: 'long', year: 'numeric'
+            })
+          : ''
+
+        const vals = [
+          idx + 1, item.npp, item.nama, tgl,
+          item.jabatan, item.entitas, item.unit_kerja, item.kategori,
+          item.jenis_kelamin, item.pendidikan, item.organik_non_organik,
+          item.pusat_pelayanan, item.non_operasional,
+          item.status_laporan_rakomdir, item.bulan,
+        ]
+
+        vals.forEach((v, i) => {
+          const cell     = row.getCell(i + 1)
+          cell.value     = v ?? ''
+          cell.font      = { name: 'Arial', size: 10 }
+          cell.alignment = i === 0 ? C : L
+          cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } }
+          cell.border    = thin
+        })
+      })
+
+      // --- BARIS TOTAL ---
+      const totalRowNum = allRows.length + 5
+      ws.mergeCells(totalRowNum, 1, totalRowNum, NCOLS)
+      const totalCell     = ws.getCell(totalRowNum, 1)
+      totalCell.value     = `TOTAL: ${allRows.length} orang`
+      totalCell.font      = { name: 'Arial', bold: true, size: 11, color: { argb: WHITE } }
+      totalCell.alignment = { horizontal: 'center', vertical: 'middle' }
+      totalCell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: GREEN } }
+      totalCell.border    = thin
+      ws.getRow(totalRowNum).height = 22
+
+      // --- LEBAR KOLOM ---
+      const widths = [5, 14, 28, 18, 30, 10, 28, 15, 14, 12, 22, 18, 18, 18, 8]
+      widths.forEach((w, i) => { ws.getColumn(i + 1).width = w })
+
+      // --- FREEZE HEADER ---
+      ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 4, activeCell: 'A5' }]
+
+      const buffer = await wb.xlsx.writeBuffer()
       await connection.end()
 
-      return new NextResponse(buffer, {
+      return new NextResponse(Buffer.from(buffer), {
         status: 200,
         headers: {
-          'Content-Disposition': `attachment; filename=SPMT_${month}_${year}.xlsx`,
+          'Content-Disposition': `attachment; filename=SPMT_${bulanName}_${year}.xlsx`,
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         },
       })
     }
 
     // PAGINATION (TABLE VIEW)
-    const total = allRows.length
+    const total        = allRows.length
     const paginatedRows = allRows.slice(offset, offset + limit)
-
     await connection.end()
 
     return NextResponse.json({
       success: true,
       data: paginatedRows,
       pagination: {
-        page,
-        limit,
-        total,
+        page, limit, total,
         totalPages: Math.ceil(total / limit),
         hasNext: offset + limit < total,
         hasPrev: page > 1,
@@ -177,18 +240,12 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-
     console.error('SPMT TABLE API ERROR:', error)
-
-    if (connection) {
-      try { await connection.end() } catch {}
-    }
-
+    if (connection) { try { await connection.end() } catch {} }
     return NextResponse.json({
       success: false,
       error: 'Failed fetch spmt table',
       debug: error instanceof Error ? error.message : error
     }, { status: 500 })
-
   }
 }

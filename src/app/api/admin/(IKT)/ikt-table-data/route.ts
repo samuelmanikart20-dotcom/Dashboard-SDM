@@ -1,13 +1,16 @@
 export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import mysql from 'mysql2/promise';
+import ExcelJS from 'exceljs';
+
+export const dynamic = "force-dynamic";
 
 const dbConfig = {
-  host: process.env.DB_HOST || '127.0.0.1',
-  user: process.env.DB_USER || 'root',
+  host:     process.env.DB_HOST     || '127.0.0.1',
+  user:     process.env.DB_USER     || 'root',
   password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'spmt_pelindo_revisi',
-  port: Number(process.env.DB_PORT) || 3307
+  database: process.env.DB_NAME     || 'spmt_pelindo_revisi',
+  port:     Number(process.env.DB_PORT) || 3307
 };
 
 export async function GET(request: NextRequest) {
@@ -15,12 +18,12 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const bulan = searchParams.get('bulan');
-    const tahun = searchParams.get('tahun');
-    const unitKerja = searchParams.get('unit_kerja');
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
-    const limit = Math.max(1, Math.min(10000, parseInt(searchParams.get('limit') || '100', 10) || 100));
-    const exportType = (searchParams.get('export') || '').toLowerCase();
+    const bulan      = searchParams.get('bulan');
+    const tahun      = searchParams.get('tahun');
+    const unitKerja  = searchParams.get('unit_kerja');
+    const exportExcel = searchParams.get('export');
+    const page       = Math.max(1, parseInt(searchParams.get('page')  || '1',   10) || 1);
+    const limit      = Math.max(1, Math.min(10000, parseInt(searchParams.get('limit') || '100', 10) || 100));
 
     if (!bulan || !tahun) {
       return NextResponse.json({ message: 'Bulan dan tahun harus diisi' }, { status: 400 });
@@ -28,7 +31,7 @@ export async function GET(request: NextRequest) {
 
     connection = await mysql.createConnection(dbConfig);
 
-    // Build WHERE clause
+    // ── WHERE clause ─────────────────────────────────────────────────────────
     let whereClause = '';
     const params: (string | number)[] = [];
 
@@ -41,240 +44,256 @@ export async function GET(request: NextRequest) {
     } else {
       const bulanInt = parseInt(bulan, 10);
       const tahunInt = parseInt(tahun, 10);
-      
-      // Validate bulan is between 1-12
+
       if (isNaN(bulanInt) || bulanInt < 1 || bulanInt > 12) {
         return NextResponse.json({ message: 'Bulan tidak valid (harus 1-12 atau "all")' }, { status: 400 });
       }
-      
-      // Validate tahun is reasonable
       if (isNaN(tahunInt) || tahunInt < 2000 || tahunInt > 2100) {
         return NextResponse.json({ message: 'Tahun tidak valid' }, { status: 400 });
       }
-      
+
       whereClause = 'WHERE bulan = ? AND tahun = ?';
       params.push(bulanInt, tahunInt);
     }
 
-    // Ignore unit_kerja during export to export all units
-    if (exportType !== 'excel' && unitKerja && unitKerja !== 'all') {
-      // Map dashboard codes to flexible patterns stored in DB
-      const unitKerjaUpper = unitKerja.toUpperCase();
-      if (unitKerjaUpper.includes('KP') || unitKerja === 'IKT-KP') {
-        // KANTOR PUSAT
+    // ── Unit kerja filter (skip saat export agar semua unit masuk) ────────────
+    if (exportExcel !== 'excel' && unitKerja && unitKerja !== 'all') {
+      const uk = unitKerja.toUpperCase();
+
+      if (uk.includes('KP') || unitKerja === 'IKT-KP') {
         whereClause += ' AND (unit_kerja LIKE ? OR unit_kerja LIKE ? OR unit_kerja LIKE ?)';
         params.push('%KANTOR PUSAT%', '%Kantor Pusat%', '%PUSAT%');
-      } else if (unitKerjaUpper.includes('JKT') || unitKerja === 'IKT-JKT') {
-        // Branch Jakarta
+      } else if (uk.includes('JKT') || unitKerja === 'IKT-JKT') {
         whereClause += ' AND (unit_kerja LIKE ? OR unit_kerja LIKE ? OR unit_kerja LIKE ?)';
         params.push('%Jakarta%', '%JAKARTA%', '%JKT%');
-      } else if (unitKerjaUpper.includes('BPP') || unitKerja === 'IKT-BPP') {
-        // BALIKPAPAN
+      } else if (uk.includes('BPP') || unitKerja === 'IKT-BPP') {
         whereClause += ' AND (unit_kerja LIKE ? OR unit_kerja LIKE ?)';
         params.push('%BALIKPAPAN%', '%Balikpapan%');
-      } else if (unitKerjaUpper.includes('BJM') || unitKerja === 'IKT-BJM') {
-        // BANJARMASIN
+      } else if (uk.includes('BJM') || unitKerja === 'IKT-BJM') {
         whereClause += ' AND (unit_kerja LIKE ? OR unit_kerja LIKE ?)';
         params.push('%BANJARMASIN%', '%Banjarmasin%');
-      } else if (unitKerjaUpper.includes('BLW') || unitKerja === 'IKT-BLW') {
-        // BELAWAN
+      } else if (uk.includes('BLW') || unitKerja === 'IKT-BLW') {
         whereClause += ' AND (unit_kerja LIKE ? OR unit_kerja LIKE ?)';
         params.push('%BELAWAN%', '%Belawan%');
-      } else if (unitKerjaUpper.includes('MKS') || unitKerja === 'IKT-MKS') {
-        // MAKASSAR
+      } else if (uk.includes('MKS') || unitKerja === 'IKT-MKS') {
         whereClause += ' AND (unit_kerja LIKE ? OR unit_kerja LIKE ?)';
         params.push('%MAKASSAR%', '%Makassar%');
-      } else if (unitKerjaUpper.includes('PTK') || unitKerja === 'IKT-PTK') {
-        // PONTIANAK
+      } else if (uk.includes('PTK') || unitKerja === 'IKT-PTK') {
         whereClause += ' AND (unit_kerja LIKE ? OR unit_kerja LIKE ?)';
         params.push('%PONTIANAK%', '%Pontianak%');
-      } else if (unitKerjaUpper.includes('TPK') || unitKerja === 'IKT-TPK') {
-        // TANJUNG PRIOK
+      } else if (uk.includes('TPK') || unitKerja === 'IKT-TPK') {
         whereClause += ' AND (unit_kerja LIKE ? OR unit_kerja LIKE ? OR unit_kerja LIKE ?)';
         params.push('%TANJUNG PRIOK%', '%Tanjung Priok%', '%PRIOK%');
       } else {
-        // Fallback to broad like
         whereClause += ' AND unit_kerja LIKE ?';
         params.push(`%${unitKerja}%`);
       }
     }
 
-    // Export to Excel (no pagination)
-    if (exportType === 'excel') {
-      const XLSX = await import('xlsx');
+    const bulanNames = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    const bulanName = bulan && bulan !== 'all'
+      ? (bulanNames[parseInt(bulan)] || bulan)
+      : 'Semua';
+
+    const SELECT_COLS = `
+      npp, nama, tanggal_lahir, jabatan, entitas, unit_kerja, kategori,
+      jenis_kelamin, pendidikan, organik_non_organik, pusat_pelayanan,
+      non_operasional, status_laporan, bulan, tahun
+    `;
+
+    // =========================================================================
+    // EXPORT EXCEL
+    // =========================================================================
+    if (exportExcel === 'excel') {
 
       const [exportRows] = await connection.execute(
-        `SELECT 
-          npp,
-          nama,
-          tanggal_lahir,
-          jabatan,
-          entitas,
-          unit_kerja,
-          kategori,
-          jenis_kelamin,
-          pendidikan,
-          organik_non_organik,
-          pusat_pelayanan,
-          non_operasional,
-          status_laporan,
-          bulan,
-          tahun
-         FROM iktdata ${whereClause}
-         ORDER BY nama ASC`,
+        `SELECT ${SELECT_COLS} FROM iktdata ${whereClause} ORDER BY nama ASC`,
         params
       );
 
-      const header = [
-        'NPP','Nama','Tanggal Lahir','Jabatan','Entitas','Unit Kerja',
-        'Kategori','Jenis Kelamin','Pendidikan','Organik/Non Organik',
-        'Pusat Pelayanan','Non Operasional','Status Laporan','Bulan','Tahun'
-      ];
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('DATA IKT');
 
-      const safeFormatDate = (v: any): string => {
-        if (!v) return '';
-        const str = typeof v === 'string' ? v : '' + v;
-        if (!str || str === '0000-00-00') return '';
-        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-        const d = new Date(str);
-        if (isNaN(d.getTime())) return '';
-        return d.toISOString().split('T')[0];
+      const GREEN     = '1A5C38';
+      const GREEN_SUB = 'D9EAD3';
+      const GREEN_ROW = 'EAF4EA';
+      const WHITE     = 'FFFFFF';
+      const NCOLS     = 15;
+
+      const thin: Partial<ExcelJS.Borders> = {
+        top:    { style: 'thin' as ExcelJS.BorderStyle },
+        left:   { style: 'thin' as ExcelJS.BorderStyle },
+        bottom: { style: 'thin' as ExcelJS.BorderStyle },
+        right:  { style: 'thin' as ExcelJS.BorderStyle },
       };
 
-      const rows = (exportRows as any[]).map(r => ([
-        r.npp || '',
-        r.nama || '',
-        safeFormatDate(r.tanggal_lahir),
-        r.jabatan || '',
-        r.entitas || '',
-        r.unit_kerja || '',
-        r.kategori || '',
-        r.jenis_kelamin || '',
-        r.pendidikan || '',
-        r.organik_non_organik || '',
-        r.pusat_pelayanan || '',
-        r.non_operasional || '',
-        r.status_laporan || '',
-        r.bulan ?? '',
-        r.tahun ?? ''
-      ]));
+      const C = { h: 'center' as const, v: 'middle' as const, wrapText: true };
+      const L = { h: 'left'   as const, v: 'middle' as const, wrapText: true };
 
-      const worksheet = XLSX.utils.aoa_to_sheet([header, ...rows]);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'IKT');
-      const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+      // --- BARIS 1: JUDUL UTAMA ---
+      ws.mergeCells(1, 1, 1, NCOLS);
+      const b1     = ws.getCell('A1');
+      b1.value     = 'DATA IKT - PELINDO';
+      b1.font      = { name: 'Arial', bold: true, size: 14, color: { argb: WHITE } };
+      b1.alignment = { horizontal: 'center', vertical: 'middle' };
+      b1.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: GREEN } };
+      ws.getRow(1).height = 32;
 
-      const labelMonth = bulan && bulan !== 'all' ? bulan : 'ALL';
-      const labelYear = tahun || 'ALL';
-      const filename = `IKT_${labelYear}_${labelMonth}.xlsx`;
+      // --- BARIS 2: SUB JUDUL ---
+      ws.mergeCells(2, 1, 2, NCOLS);
+      const b2     = ws.getCell('A2');
+      b2.value     = `Entitas: IKT  |  Bulan: ${bulanName}  |  Tahun: ${tahun || ''}`;
+      b2.font      = { name: 'Arial', size: 11, color: { argb: '000000' } };
+      b2.alignment = { horizontal: 'center', vertical: 'middle' };
+      b2.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: GREEN_SUB } };
+      ws.getRow(2).height = 22;
 
+      // --- BARIS 3: KOSONG ---
+      ws.getRow(3).height = 8;
+
+      // --- BARIS 4: HEADER ---
+      const headers = [
+        'No', 'NPP', 'Nama', 'Tanggal Lahir', 'Jabatan', 'Entitas',
+        'Unit Kerja', 'Kategori', 'Jenis Kelamin', 'Pendidikan',
+        'Organik/Non Organik', 'Pusat Pelayanan', 'Non Operasional',
+        'Status Laporan', 'Bulan'
+      ];
+      ws.getRow(4).height = 36;
+      headers.forEach((h, i) => {
+        const cell     = ws.getRow(4).getCell(i + 1);
+        cell.value     = h;
+        cell.font      = { name: 'Arial', bold: true, size: 11, color: { argb: WHITE } };
+        cell.alignment = C;
+        cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: GREEN } };
+        cell.border    = thin;
+      });
+
+      // --- BARIS DATA ---
+      const safeDate = (v: any): string => {
+        if (!v) return '';
+        const str = typeof v === 'string' ? v : String(v);
+        if (!str || str === '0000-00-00') return '';
+        const d = new Date(str);
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+      };
+
+      (exportRows as any[]).forEach((item, idx) => {
+        const row  = ws.getRow(idx + 5);
+        row.height = 18;
+        const bg   = idx % 2 === 0 ? GREEN_ROW : WHITE;
+
+        const vals = [
+          idx + 1, item.npp, item.nama, safeDate(item.tanggal_lahir),
+          item.jabatan, item.entitas, item.unit_kerja, item.kategori,
+          item.jenis_kelamin, item.pendidikan, item.organik_non_organik,
+          item.pusat_pelayanan, item.non_operasional,
+          item.status_laporan, item.bulan,
+        ];
+
+        vals.forEach((v, i) => {
+          const cell     = row.getCell(i + 1);
+          cell.value     = v ?? '';
+          cell.font      = { name: 'Arial', size: 10 };
+          cell.alignment = i === 0 ? C : L;
+          cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+          cell.border    = thin;
+        });
+      });
+
+      // --- BARIS TOTAL ---
+      const allRows    = exportRows as any[];
+      const totalRowNum = allRows.length + 5;
+      ws.mergeCells(totalRowNum, 1, totalRowNum, NCOLS);
+      const totalCell     = ws.getCell(totalRowNum, 1);
+      totalCell.value     = `TOTAL: ${allRows.length} orang`;
+      totalCell.font      = { name: 'Arial', bold: true, size: 11, color: { argb: WHITE } };
+      totalCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      totalCell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: GREEN } };
+      totalCell.border    = thin;
+      ws.getRow(totalRowNum).height = 22;
+
+      // --- LEBAR KOLOM ---
+      const widths = [5, 14, 28, 18, 30, 10, 28, 15, 14, 12, 22, 18, 18, 18, 8];
+      widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+      // --- FREEZE HEADER ---
+      ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 4, activeCell: 'A5' }];
+
+      const buffer = await wb.xlsx.writeBuffer();
       await connection.end();
       connection = null;
-      return new NextResponse(new Uint8Array(buffer), {
+
+      const labelMonth = bulan && bulan !== 'all' ? bulanName : 'ALL';
+      const labelYear  = tahun || 'ALL';
+
+      return new NextResponse(Buffer.from(buffer), {
+        status: 200,
         headers: {
+          'Content-Disposition': `attachment; filename=IKT_${labelYear}_${labelMonth}.xlsx`,
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="${filename}"`,
-          'Cache-Control': 'no-store'
-        }
+        },
       });
     }
 
-    // Get total count for pagination
+    // ── PAGINATED JSON ────────────────────────────────────────────────────────
     const [countResult] = await connection.execute(
       `SELECT COUNT(*) as total FROM iktdata ${whereClause}`,
       params
     );
-    const total = (countResult as any)[0].total;
-
-    // Calculate pagination
-    const offset = Math.max(0, (page - 1) * limit);
+    const total      = (countResult as any)[0].total as number;
     const totalPages = Math.ceil(total / limit);
+    const offset     = Math.max(0, (page - 1) * limit);
 
-    // Get paginated data dengan validasi parameter untuk Node v24
-    const dataParams: (string | number)[] = [];
-    
-    // Filter params untuk menghindari undefined/null
-    for (const param of params) {
-      if (param !== undefined && param !== null) {
-        if (typeof param === 'number' && !isNaN(param)) {
-          dataParams.push(param);
-        } else if (typeof param === 'string') {
-          dataParams.push(param);
-        }
-      }
-    }
-    
-    // Pastikan limit dan offset adalah integer murni dan valid
-    const limitInt = Math.floor(Number(limit));
+    // Validate & push pagination params (Node v24 safety)
+    const dataParams: (string | number)[] = params.filter(
+      p => (typeof p === 'number' && !isNaN(p)) || typeof p === 'string'
+    );
+    const limitInt  = Math.floor(Number(limit));
     const offsetInt = Math.floor(Number(offset));
     if (isNaN(limitInt) || isNaN(offsetInt) || limitInt < 0 || offsetInt < 0) {
-      throw new Error(`Invalid pagination parameters: limit=${limitInt}, offset=${offsetInt}`);
+      throw new Error(`Invalid pagination: limit=${limitInt}, offset=${offsetInt}`);
     }
     dataParams.push(limitInt, offsetInt);
-    
+
     const [rows] = await connection.execute(
-      `SELECT 
-        npp,
-        nama,
-        tanggal_lahir,
-        jabatan,
-        entitas,
-        unit_kerja,
-        kategori,
-        jenis_kelamin,
-        pendidikan,
-        organik_non_organik,
-        pusat_pelayanan,
-        non_operasional,
-        status_laporan,
-        bulan,
-        tahun
-       FROM iktdata ${whereClause}
-       ORDER BY nama ASC
-       LIMIT ? OFFSET ?`,
+      `SELECT ${SELECT_COLS} FROM iktdata ${whereClause} ORDER BY nama ASC LIMIT ? OFFSET ?`,
       dataParams
     );
 
-    // Format the data
     const tableData = (rows as any[]).map(row => ({
-      npp: row.npp,
-      nama: row.nama,
-      tanggal_lahir: row.tanggal_lahir ? new Date(row.tanggal_lahir).toISOString().split('T')[0] : '',
-      jabatan: row.jabatan || '',
-      entitas: row.entitas || '',
-      unit_kerja: row.unit_kerja || '',
-      kategori: row.kategori || '',
-      jenis_kelamin: row.jenis_kelamin || '',
-      pendidikan: row.pendidikan || '',
-      organik_non_organik: row.organik_non_organik || '',
-      pusat_pelayanan: row.pusat_pelayanan || '',
-      non_operasional: row.non_operasional || '',
-      status_laporan: row.status_laporan || '',
-      bulan: row.bulan,
-      tahun: row.tahun
+      npp:                  row.npp,
+      nama:                 row.nama,
+      tanggal_lahir:        row.tanggal_lahir
+                              ? new Date(row.tanggal_lahir).toISOString().split('T')[0]
+                              : '',
+      jabatan:              row.jabatan              || '',
+      entitas:              row.entitas              || '',
+      unit_kerja:           row.unit_kerja           || '',
+      kategori:             row.kategori             || '',
+      jenis_kelamin:        row.jenis_kelamin        || '',
+      pendidikan:           row.pendidikan           || '',
+      organik_non_organik:  row.organik_non_organik  || '',
+      pusat_pelayanan:      row.pusat_pelayanan      || '',
+      non_operasional:      row.non_operasional      || '',
+      status_laporan:       row.status_laporan       || '',
+      bulan:                row.bulan,
+      tahun:                row.tahun,
     }));
 
     return NextResponse.json({
       tableData,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages,
-        hasNext: page < totalPages,
-        hasPrev: page > 1
-      }
+      pagination: { page, limit, total, totalPages, hasNext: page < totalPages, hasPrev: page > 1 },
     });
 
   } catch (error) {
-    console.error('Error fetching IKT table data:', error);
+    console.error('IKT TABLE API ERROR:', error);
     return NextResponse.json(
-      { message: 'Error fetching table data' },
+      { message: 'Error fetching table data', debug: error instanceof Error ? error.message : error },
       { status: 500 }
     );
   } finally {
-    if (connection) {
-      try { await connection.end(); } catch {}
-    }
+    if (connection) { try { await connection.end(); } catch {} }
   }
 }
