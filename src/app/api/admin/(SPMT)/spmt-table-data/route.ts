@@ -169,10 +169,15 @@ export async function GET(request: NextRequest) {
         row.height    = 18
         const bg      = idx % 2 === 0 ? GREEN_ROW : WHITE
 
+        // ✅ FIX TIMEZONE: gunakan UTC methods agar tanggal tidak mundur sehari
         const tgl = item.tanggal_lahir
-          ? new Date(item.tanggal_lahir).toLocaleDateString('id-ID', {
-              day: '2-digit', month: 'long', year: 'numeric'
-            })
+          ? (() => {
+              const d = new Date(item.tanggal_lahir)
+              const day   = d.getUTCDate().toString().padStart(2, '0')
+              const month = d.toLocaleString('id-ID', { month: 'long', timeZone: 'UTC' })
+              const yr    = d.getUTCFullYear()
+              return `${day} ${month} ${yr}`
+            })()
           : ''
 
         const vals = [
