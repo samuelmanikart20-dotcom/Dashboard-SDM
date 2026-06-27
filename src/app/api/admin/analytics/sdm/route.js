@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import { prismaClient } from "@/lib/prisma";
 
 export async function GET() {
   try {
-    const data = await prisma.sdm_data.groupBy({
+    const data = await prismaClient.sdm_data.groupBy({
       by: ["tahun", "bulan"],
       _sum: {
         jumlah: true,
@@ -46,6 +46,11 @@ export async function GET() {
       insight,
     });
   } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    );
   }
 }
