@@ -283,8 +283,8 @@ export default function DashboardOrgChart({
           label: isVacant ? "" : (node.nama || ""),
           subtitle: node.nama_posisi || node.nama_jabatan_sap || "-",
           positionTitle: node.nama_posisi || node.nama_jabatan_sap || undefined,
-          unit: node.unit_kerja || null,
-          nipp: node.nipp || null,
+          unit: node.unit_kerja ?? undefined,
+          nipp: node.nipp ?? undefined,
           photoUrl: photoUrl, // Pastikan photoUrl di-set dengan benar
           no_hp: noHp, // Pastikan no_hp di-set dengan benar
           tmt_jabatan: node.tmt_jabatan || undefined,
