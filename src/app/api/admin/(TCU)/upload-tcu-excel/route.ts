@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
 
     const workbook = XLSX.read(buffer, { type: 'buffer' })
 
-    let finalData: any[] = []
+    const finalData: any[] = []
 
     // ── 1. BACA SEMUA SHEET ──────────────────────────────────
     workbook.SheetNames.forEach((sheetName) => {
